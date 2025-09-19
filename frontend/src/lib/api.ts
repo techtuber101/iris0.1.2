@@ -2136,14 +2136,13 @@ export const checkBillingStatus = async (): Promise<BillingStatusResponse> => {
   return {
     can_run: true,
     message: 'Billing disabled - unlimited usage',
-    balance: 10000,
-    tier: 'unlimited',
     subscription: {
       price_id: 'billing_disabled',
       plan_name: 'Unlimited',
-      minutes_limit: 'unlimited'
+      minutes_limit: 999999
     }
   };
+};
 
 export const cancelSubscription = async (): Promise<CancelSubscriptionResponse> => {
   try {
