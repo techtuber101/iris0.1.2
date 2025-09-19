@@ -1,0 +1,8 @@
+{
+  "projectId": "prj_ICtWUeSHsETTZH30RyyiQE5DvQJW",
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "installCommand": "npm ci",
+  "devCommand": "npm run dev"
+}

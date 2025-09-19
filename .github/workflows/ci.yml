@@ -147,24 +147,24 @@ jobs:
           echo "Installing Vercel CLI..."
           npm install -g vercel@latest
           
-          echo "Deploying to Vercel..."
+          echo "Deploying to existing Vercel project..."
           cd frontend
           vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes
       
-      - name: Deploy Backend to Render
+      - name: Deploy Backend to Railway
         run: |
-          echo "🚀 Render auto-deployment will be triggered by GitHub push"
-          echo "Render service: iris-backend"
-          echo "Make sure Render is connected to this GitHub repository"
-          echo "Backend URL: https://iris-backend.onrender.com"
+          echo "🚀 Railway auto-deployment will be triggered by GitHub push"
+          echo "Railway service: iris012-production"
+          echo "Make sure Railway is connected to this GitHub repository"
+          echo "Backend URL: https://iris012-production.up.railway.app"
       
       - name: Verify Deployments
         run: |
           echo "✅ PRODUCTION Deployment completed!"
           echo "Frontend: Deployed to Vercel (production)"
-          echo "Backend: Render auto-deployment triggered"
+          echo "Backend: Railway auto-deployment triggered"
           echo "Redis: Using Upstash Redis"
           echo ""
           echo "🌐 Your app should be live at:"
           echo "Frontend: https://irisvision.ai"
-          echo "Backend: https://iris-backend.onrender.com"
+          echo "Backend: https://iris012-production.up.railway.app"
