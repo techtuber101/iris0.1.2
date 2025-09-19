@@ -149,7 +149,7 @@ jobs:
           
           echo "Deploying to existing Vercel project..."
           cd frontend
-          vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes
+          vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes --project-id prj_ICtWUeSHsETTZH30RyyiQE5DvQJW
       
       - name: Deploy Backend to Railway
         run: |

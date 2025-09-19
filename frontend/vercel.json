@@ -1,5 +1,4 @@
 {
-  "projectId": "prj_ICtWUeSHsETTZH30RyyiQE5DvQJW",
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "outputDirectory": ".next",
