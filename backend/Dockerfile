@@ -1,11 +1,15 @@
 FROM ghcr.io/astral-sh/uv:python3.11-alpine
 
-ENV ENV_MODE production
+# Set environment mode
+ENV ENV_MODE=production
+
+# Set working directory
 WORKDIR /app
 
+# Install system dependencies
 RUN apk add --no-cache curl git
 
-# Install Python dependencies
+# Copy dependency files and install
 COPY pyproject.toml uv.lock ./
 ENV UV_LINK_MODE=copy
 RUN uv sync --locked --quiet
@@ -13,15 +17,9 @@ RUN uv sync --locked --quiet
 # Copy application code
 COPY . .
 
-# Calculate optimal worker count based on 16 vCPUs
-# Using (2*CPU)+1 formula for CPU-bound applications
-ENV WORKERS=7
-ENV THREADS=2
-ENV WORKER_CONNECTIONS=2000
+# Optional: expose a default port for local dev
+# (ignored by Railway since it injects its own PORT at runtime)
+EXPOSE 8000
 
-ENV PYTHONPATH=/app
-ENV PORT=8000
-EXPOSE $PORT
-
-# Start command for Railway
-CMD ["sh", "-c", "uv run python -m uvicorn core.run:app --host 0.0.0.0 --port $PORT"]
+# Start command — uses Railway's $PORT if set, otherwise defaults to 8000
+CMD ["sh", "-c", "uv run python -m uvicorn core.run:app --host 0.0.0.0 --port ${PORT:-8000}"]
