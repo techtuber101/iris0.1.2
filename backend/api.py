@@ -222,6 +222,11 @@ async def health_check():
 async def root():
     return {"message": "Iris API is running", "status": "ok"}
 
+# Add health endpoint at root level for Railway health checks
+@app.get("/health")
+async def health():
+    return {"status": "ok", "message": "Iris API is healthy"}
+
 app.include_router(api_router, prefix="/api")
 app.include_router(billing_router)
 app.include_router(transcription_api.router)
