@@ -1,18 +1,19 @@
 name: Deploy Hybrid (Vercel + Railway)
 
-on:
-  push:
-    branches: [main, production]
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        default: 'staging'
-        type: choice
-        options:
-        - staging
-        - production
+# DISABLED - Using CI workflow for deployment instead
+# on:
+#   push:
+#     branches: [main, production]
+#   workflow_dispatch:
+#     inputs:
+#       environment:
+#         description: 'Environment to deploy to'
+#         required: true
+#         default: 'staging'
+#         type: choice
+#         options:
+#         - staging
+#         - production
 
 jobs:
   deploy:
