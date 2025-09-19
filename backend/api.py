@@ -127,18 +127,17 @@ async def log_requests_middleware(request: Request, call_next):
         raise
 
 # Define allowed origins based on environment
-allowed_origins = ["https://www.suna.so", "https://suna.so"]
+allowed_origins = [
+    "https://irisvision.ai",
+    "https://www.irisvision.ai", 
+    "https://staging.irisvision.ai",
+    "http://localhost:3000"
+]
 allow_origin_regex = None
 
-# Add staging-specific origins
-if config.ENV_MODE == EnvMode.LOCAL:
-    allowed_origins.append("http://localhost:3000")
-
-# Add staging-specific origins
+# Add Vercel preview URLs for staging/development
 if config.ENV_MODE == EnvMode.STAGING:
-    allowed_origins.append("https://staging.suna.so")
-    allowed_origins.append("http://localhost:3000")
-    allow_origin_regex = r"https://suna-.*-prjcts\.vercel\.app"
+    allow_origin_regex = r"https://.*\.vercel\.app"
 
 app.add_middleware(
     CORSMiddleware,
@@ -217,6 +216,11 @@ async def health_check():
         logger.error(f"Failed health docker check: {e}")
         raise HTTPException(status_code=500, detail="Health check failed")
 
+
+# Add root endpoint to handle Railway health checks
+@app.get("/")
+async def root():
+    return {"message": "Iris API is running", "status": "ok"}
 
 app.include_router(api_router, prefix="/api")
 app.include_router(billing_router)
