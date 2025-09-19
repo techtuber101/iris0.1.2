@@ -147,9 +147,9 @@ jobs:
           echo "Installing Vercel CLI..."
           npm install -g vercel@latest
           
-          echo "Deploying to existing Vercel project..."
+          echo "Deploying to Vercel..."
           cd frontend
-          vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes --project-id prj_ICtWUeSHsETTZH30RyyiQE5DvQJW
+          vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes
       
       - name: Deploy Backend to Railway
         run: |
