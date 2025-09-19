@@ -3,7 +3,6 @@ name: Build, push and deploy
 on:
   push:
     branches:
-      - main
       - PRODUCTION
   workflow_dispatch:
   repository_dispatch:
