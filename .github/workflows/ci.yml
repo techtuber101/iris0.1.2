@@ -1,0 +1,144 @@
+name: CI - Test & Validate
+
+on:
+  push:
+    branches: [main, production, staging]
+  pull_request:
+    branches: [main, production]
+  workflow_dispatch:
+
+jobs:
+  test-frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run ESLint
+        run: npm run lint
+      
+      - name: Run TypeScript check
+        run: npx tsc --noEmit
+      
+      - name: Build frontend
+        run: npm run build
+        env:
+          NEXT_PUBLIC_ENV_MODE: test
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_BACKEND_URL: https://api-staging.irisvision.ai
+          NEXT_PUBLIC_URL: https://staging.irisvision.ai
+
+  test-backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      
+      - name: Install dependencies
+        run: uv sync
+      
+      - name: Run tests
+        run: uv run python -m pytest test/ -v
+        env:
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      
+      - name: Check code formatting
+        run: uv run ruff check .
+      
+      - name: Check imports
+        run: uv run ruff check --select I .
+
+  test-mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./apps/mobile
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: apps/mobile/package-lock.json
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run ESLint
+        run: npm run lint
+      
+      - name: Run TypeScript check
+        run: npx tsc --noEmit
+
+  validate-environment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Validate environment files exist
+        run: |
+          echo "Checking environment files..."
+          test -f backend/.env.local && echo "✅ backend/.env.local exists" || echo "❌ backend/.env.local missing"
+          test -f backend/.env.staging && echo "✅ backend/.env.staging exists" || echo "❌ backend/.env.staging missing"
+          test -f backend/.env.production && echo "✅ backend/.env.production exists" || echo "❌ backend/.env.production missing"
+          test -f frontend/.env.local && echo "✅ frontend/.env.local exists" || echo "❌ frontend/.env.local missing"
+          test -f frontend/.env.staging && echo "✅ frontend/.env.staging exists" || echo "❌ frontend/.env.staging missing"
+          test -f frontend/.env.production && echo "✅ frontend/.env.production exists" || echo "❌ frontend/.env.production missing"
+      
+      - name: Test environment switching
+        run: |
+          echo "Testing environment switching..."
+          chmod +x switch-env.sh
+          ./switch-env.sh staging
+          echo "✅ Environment switching works"
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
