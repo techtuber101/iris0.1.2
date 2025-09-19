@@ -209,3 +209,4 @@ Kortix is licensed under the Apache License, Version 2.0. See [LICENSE](./LICENS
 [Get Started](./docs/SELF-HOSTING.md) • [Join Discord](https://discord.gg/Py6pCBUUPw) • [Follow on Twitter](https://x.com/kortixai)
 
 </div># Auto-deployment test
+# Trigger deployment workflow
