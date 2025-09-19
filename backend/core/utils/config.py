@@ -464,6 +464,10 @@ class Configuration:
                 else:
                     # String or other type
                     setattr(self, key, env_val)
+            else:
+                # Initialize attribute with None if not set in environment
+                # This ensures the attribute exists for validation
+                setattr(self, key, None)
         
         # Custom handling for environment-dependent properties
         max_parallel_runs_env = os.getenv("MAX_PARALLEL_AGENT_RUNS")
