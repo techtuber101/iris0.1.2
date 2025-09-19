@@ -1,8 +1,6 @@
 name: CI - Test & Validate
 
 on:
-  push:
-    branches: [main, production, staging]
   pull_request:
     branches: [main, production]
   workflow_dispatch:
