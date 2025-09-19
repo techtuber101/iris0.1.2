@@ -151,19 +151,20 @@ jobs:
           cd frontend
           vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes
       
-      - name: Deploy Backend to Railway
+      - name: Deploy Backend to Render
         run: |
-          echo "🚂 Railway auto-deployment will be triggered by GitHub push"
-          echo "Railway service: iris-backend-prod"
-          echo "Make sure Railway is connected to this GitHub repository"
+          echo "🚀 Render auto-deployment will be triggered by GitHub push"
+          echo "Render service: iris-backend"
+          echo "Make sure Render is connected to this GitHub repository"
+          echo "Backend URL: https://iris-backend.onrender.com"
       
       - name: Verify Deployments
         run: |
           echo "✅ PRODUCTION Deployment completed!"
           echo "Frontend: Deployed to Vercel (production)"
-          echo "Backend: Railway auto-deployment triggered"
+          echo "Backend: Render auto-deployment triggered"
           echo "Redis: Using Upstash Redis"
           echo ""
           echo "🌐 Your app should be live at:"
           echo "Frontend: https://irisvision.ai"
-          echo "Backend: https://api.irisvision.ai"
+          echo "Backend: https://iris-backend.onrender.com"
