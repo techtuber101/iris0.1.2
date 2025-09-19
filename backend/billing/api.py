@@ -24,7 +24,19 @@ from .payment_service import payment_service
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
-stripe.api_key = config.STRIPE_SECRET_KEY
+# Only initialize Stripe if secret key is provided
+if config.STRIPE_SECRET_KEY:
+    stripe.api_key = config.STRIPE_SECRET_KEY
+else:
+    logger.warning("Stripe secret key not provided - billing functionality disabled")
+
+def check_stripe_available():
+    """Check if Stripe is properly configured"""
+    if not config.STRIPE_SECRET_KEY:
+        raise HTTPException(
+            status_code=503, 
+            detail="Billing service unavailable - Stripe not configured"
+        )
 
 class CreateCheckoutSessionRequest(BaseModel):
     price_id: str
@@ -300,6 +312,7 @@ async def deduct_token_usage(
 async def get_credit_balance(
     account_id: str = Depends(verify_and_get_user_id_from_jwt)
 ) -> Dict:
+    check_stripe_available()
     db = DBConnection()
     client = await db.client
     
@@ -375,6 +388,7 @@ async def stripe_webhook(request: Request):
 async def get_subscription(
     account_id: str = Depends(verify_and_get_user_id_from_jwt)
 ) -> Dict:
+    check_stripe_available()
     try:
         subscription_info = await subscription_service.get_subscription(account_id)
         
@@ -762,6 +776,7 @@ async def get_usage_history(
 async def get_available_models(
     account_id: str = Depends(verify_and_get_user_id_from_jwt)
 ) -> Dict:
+    check_stripe_available()
     try:
         from core.ai_models import model_manager
         from core.services.supabase import DBConnection
