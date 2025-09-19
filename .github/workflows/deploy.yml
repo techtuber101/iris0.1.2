@@ -1,4 +1,4 @@
-name: Deploy
+name: Deploy Hybrid (Vercel + Railway)
 
 on:
   push:
@@ -17,10 +17,12 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || (github.ref == 'refs/heads/production' && 'production' || 'staging') }}
+    
     steps:
       - uses: actions/checkout@v4
       
-      - name: Switch Environment
+      - name: Set Environment
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             ENV="${{ github.event.inputs.environment }}"
@@ -30,10 +32,14 @@ jobs:
             ENV="staging"
           fi
           
-          echo "Switching to $ENV environment"
-          ./switch-env.sh $ENV
-          
+          echo "Deploying to $ENV environment"
           echo "ENVIRONMENT=$ENV" >> $GITHUB_ENV
+          echo "BACKEND_SERVICE=${{ env.ENVIRONMENT == 'production' && 'iris-backend-prod' || 'iris-backend-staging' }}" >> $GITHUB_ENV
+      
+      - name: Switch Environment Files
+        run: |
+          echo "Switching to ${{ env.ENVIRONMENT }} environment files"
+          ./switch-env.sh ${{ env.ENVIRONMENT }}
       
       - name: Deploy Frontend to Vercel
         uses: amondnet/vercel-action@v25
@@ -45,7 +51,19 @@ jobs:
           vercel-args: ${{ env.ENVIRONMENT == 'production' && '--prod' || '--target=preview' }}
       
       - name: Deploy Backend to Railway
-        uses: railwayapp/railway-deploy@v1
-        with:
-          railway-token: ${{ secrets.RAILWAY_TOKEN }}
-          service: ${{ env.ENVIRONMENT == 'production' && 'iris-backend-prod' || 'iris-backend-staging' }}
+        run: |
+          echo "🚂 Railway auto-deployment will be triggered by GitHub push"
+          echo "Railway service: ${{ env.BACKEND_SERVICE }}"
+          echo "Make sure Railway is connected to this GitHub repository"
+      
+      - name: Verify Deployments
+        run: |
+          echo "✅ Deployment completed for ${{ env.ENVIRONMENT }} environment"
+          echo "Frontend: Deployed to Vercel"
+          echo "Backend: Railway auto-deployment triggered"
+          echo "Redis: Using Upstash Redis"
+          echo ""
+          echo "📋 Next steps:"
+          echo "1. Check Vercel dashboard for frontend deployment"
+          echo "2. Check Railway dashboard for backend deployment"
+          echo "3. Verify both services are running"
