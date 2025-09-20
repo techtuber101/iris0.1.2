@@ -488,13 +488,13 @@ async def stream_agent_run(
 ):
     """Stream the responses of an agent run using Redis Lists and Pub/Sub."""
     logger.info(f"🎯 Starting stream for agent run: {agent_run_id}")
-    logger.info(f"📊 Stream request details: method={request.method if request else 'N/A'}, url={request.url if request else 'N/A'}")
+    logger.debug(f"📊 Stream request details: method={request.method if request else 'N/A'}, url={request.url if request else 'N/A'}")
     client = await utils.db.client
 
     # Check JWT expiration before starting long-lived stream
     try:
         user_id = await get_user_id_from_stream_auth(request, token)
-        logger.info(f"✅ Authentication successful for user {user_id}")
+        logger.debug(f"✅ Authentication successful for user {user_id}")
         
         # Additional check: if token is close to expiry, warn the client
         if token:
@@ -528,7 +528,7 @@ async def stream_agent_run(
         raise HTTPException(status_code=401, detail="Authentication failed")
     
     agent_run_data = await get_agent_run_with_access_check(client, agent_run_id, user_id) # 1 db query
-    logger.info(f"📋 Agent run data retrieved: status={agent_run_data.get('status') if agent_run_data else 'None'}, thread_id={agent_run_data.get('thread_id') if agent_run_data else 'None'}")
+    logger.debug(f"📋 Agent run data retrieved: status={agent_run_data.get('status') if agent_run_data else 'None'}, thread_id={agent_run_data.get('thread_id') if agent_run_data else 'None'}")
 
     structlog.contextvars.bind_contextvars(
         agent_run_id=agent_run_id,
@@ -540,7 +540,7 @@ async def stream_agent_run(
     control_channel = f"agent_run:{agent_run_id}:control" # Global control channel
 
     async def stream_generator(agent_run_data):
-        logger.info(f"🔄 Starting stream generator for {agent_run_id} using Redis list {response_list_key} and channel {response_channel}")
+        logger.debug(f"🔄 Starting stream generator for {agent_run_id} using Redis list {response_list_key} and channel {response_channel}")
         last_processed_index = -1
         # Single pubsub used for response + control
         listener_task = None
@@ -555,27 +555,27 @@ async def stream_agent_run(
 
         try:
             # 1. Send immediate connection events (critical for client feedback)
-            logger.info(f"📡 Sending immediate connection events for {agent_run_id}")
+            logger.debug(f"📡 Sending immediate connection events for {agent_run_id}")
             yield "event: open\ndata: ok\n\n"
             yield f"data: {json.dumps({'type': 'status', 'status': 'connecting', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
             
             # 2. Fetch and yield initial responses from Redis list
-            logger.info(f"🔍 Fetching initial responses for {agent_run_id}")
+            logger.debug(f"🔍 Fetching initial responses for {agent_run_id}")
             initial_responses_json = await redis_client.lrange(response_list_key, 0, -1)
             initial_responses = []
             if initial_responses_json:
                 initial_responses = [json.loads(r) for r in initial_responses_json]
-                logger.info(f"📤 Sending {len(initial_responses)} initial responses for {agent_run_id}")
+                logger.debug(f"📤 Sending {len(initial_responses)} initial responses for {agent_run_id}")
                 for response in initial_responses:
                     yield f"data: {json.dumps(response)}\n\n"
                 last_processed_index = len(initial_responses) - 1
             else:
-                logger.info(f"📭 No initial responses found for {agent_run_id}")
+                logger.debug(f"📭 No initial responses found for {agent_run_id}")
             initial_yield_complete = True
 
             # 3. Check run status and emit appropriate status
             current_status = agent_run_data.get('status') if agent_run_data else None
-            logger.info(f"📊 Agent run {agent_run_id} current status: {current_status}")
+            logger.debug(f"📊 Agent run {agent_run_id} current status: {current_status}")
 
             if current_status != 'running':
                 logger.info(f"🏁 Agent run {agent_run_id} is not running (status: {current_status}). Ending stream.")
@@ -584,7 +584,7 @@ async def stream_agent_run(
                 return
             
             # 4. Emit processing status
-            logger.info(f"🔄 Agent run {agent_run_id} is running, starting stream processing")
+            logger.debug(f"🔄 Agent run {agent_run_id} is running, starting stream processing")
             yield f"data: {json.dumps({'type': 'status', 'status': 'processing', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
           
             structlog.contextvars.bind_contextvars(
@@ -653,8 +653,16 @@ async def stream_agent_run(
                                 if message and isinstance(message, dict) and message.get("type") == "message":
                                     channel = message.get("channel")
                                     data = message.get("data")
+                                    # Async client uses decode_responses=True, so data should be string
+                                    # But handle both cases for safety
                                     if isinstance(data, bytes):
                                         data = data.decode('utf-8')
+                                    elif isinstance(data, str):
+                                        # Already decoded by async client
+                                        pass
+                                    else:
+                                        # Convert other types to string
+                                        data = str(data)
 
                                     if channel == response_channel and data == "new":
                                         await message_queue.put({"type": "new_response"})
@@ -732,12 +740,12 @@ async def stream_agent_run(
                             new_responses = [json.loads(r) for r in new_responses_json]
                             num_new = len(new_responses)
                             message_count += num_new
-                            logger.info(f"📨 Processing {num_new} new responses for {agent_run_id} (total: {message_count})")
+                            logger.debug(f"📨 Processing {num_new} new responses for {agent_run_id} (total: {message_count})")
                             
                             for i, response in enumerate(new_responses):
                                 # Log first token
                                 if message_count == 1 and response.get('type') == 'token':
-                                    logger.info(f"🎯 FIRST TOKEN for {agent_run_id}: {response.get('content', '')[:50]}...")
+                                    logger.debug(f"🎯 FIRST TOKEN for {agent_run_id}: {response.get('content', '')[:50]}...")
                                 
                                 yield f"data: {json.dumps(response)}\n\n"
                                 

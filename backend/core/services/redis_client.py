@@ -39,7 +39,7 @@ def build_sync_client():
             port=port,
             password=password,
             db=db,
-            decode_responses=True,  # Use string mode for consistency with async client
+            decode_responses=False,  # Keep as bytes for Dramatiq compatibility
             socket_timeout=DEFAULT_TIMEOUT,
             socket_connect_timeout=DEFAULT_TIMEOUT,
             socket_keepalive=True,
@@ -213,16 +213,21 @@ async def expire(key: str, time: int):
 # Dedicated Redis clients for pub/sub operations
 async def get_publisher():
     """Get a dedicated Redis client for publishing messages."""
-    return build_async_client()
+    client = build_async_client()
+    return client
 
 async def get_subscriber():
     """Get a dedicated Redis client for subscribing to channels."""
-    return build_async_client()
+    client = build_async_client()
+    return client
 
 async def publish_to_channel(channel: str, message: str):
     """Publish a message to a specific channel using a dedicated publisher."""
     publisher = await get_publisher()
     try:
+        # Ensure message is properly encoded as UTF-8 string
+        if isinstance(message, bytes):
+            message = message.decode('utf-8')
         return await publisher.publish(channel, message)
     finally:
         await publisher.close()

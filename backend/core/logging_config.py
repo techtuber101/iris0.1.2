@@ -24,10 +24,10 @@ class RateLimitedFilter(logging.Filter):
         return False
 
 def configure_logging():
-    level = os.getenv("LOG_LEVEL", "WARNING").upper()  # Default to WARNING instead of INFO
+    level = os.getenv("LOG_LEVEL", "ERROR").upper()  # Default to ERROR instead of WARNING
     handler = logging.StreamHandler(sys.stdout)
     handler.addFilter(RateLimitedFilter(
-        max_per_window=int(os.getenv("LOG_MAX_PER_WINDOW", "50")),  # Reduced from 200 to 50
+        max_per_window=int(os.getenv("LOG_MAX_PER_WINDOW", "20")),  # Reduced from 50 to 20
         window_sec=float(os.getenv("LOG_WINDOW_SEC", "1.0")),
     ))
     fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
