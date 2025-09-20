@@ -26,7 +26,13 @@ from typing import Dict, Any
 # Try using REDIS_URL first, fallback to individual parameters
 redis_url = os.getenv('REDIS_URL')
 if redis_url:
-    redis_broker = RedisBroker.from_url(redis_url, middleware=[dramatiq.middleware.AsyncIO()])
+    # Parse Redis URL manually since from_url doesn't exist in this Dramatiq version
+    import urllib.parse
+    parsed = urllib.parse.urlparse(redis_url)
+    redis_host = parsed.hostname or 'localhost'
+    redis_port = parsed.port or 6379
+    redis_password = parsed.password or ''
+    redis_broker = RedisBroker(host=redis_host, port=redis_port, password=redis_password, middleware=[dramatiq.middleware.AsyncIO()])
 else:
     redis_host = os.getenv('REDIS_HOST', 'redis')
     redis_port = int(os.getenv('REDIS_PORT', 6379))
