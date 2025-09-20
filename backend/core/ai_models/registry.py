@@ -1,8 +1,8 @@
 from typing import Dict, List, Optional, Set
 from .ai_models import Model, ModelProvider, ModelCapability, ModelPricing
 
-DEFAULT_FREE_MODEL = "Kimi K2"
-DEFAULT_PREMIUM_MODEL = "Claude Sonnet 4"
+DEFAULT_FREE_MODEL = "Gemini 2.5 Flash"
+DEFAULT_PREMIUM_MODEL = "Gemini 2.5 Flash"
 
 class ModelRegistry:
     def __init__(self):
