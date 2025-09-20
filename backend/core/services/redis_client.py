@@ -24,8 +24,18 @@ def _normalize_url(url: str) -> str:
 
 def build_sync_client():
     url = _normalize_url(os.getenv("REDIS_URL", "").strip())
-    return redis.from_url(
-        url,
+    # Parse URL manually for redis 5.2.1 compatibility
+    parsed = urlparse(url)
+    host = parsed.hostname or 'localhost'
+    port = parsed.port or 6379
+    password = parsed.password or ''
+    db = int(parsed.path.lstrip('/')) if parsed.path.lstrip('/') else 0
+    
+    return redis.Redis(
+        host=host,
+        port=port,
+        password=password,
+        db=db,
         decode_responses=True,
         socket_timeout=DEFAULT_TIMEOUT,
         socket_connect_timeout=DEFAULT_TIMEOUT,
@@ -36,8 +46,18 @@ def build_sync_client():
 
 def build_async_client():
     url = _normalize_url(os.getenv("REDIS_URL", "").strip())
-    return redis_async.from_url(
-        url,
+    # Parse URL manually for redis 5.2.1 compatibility
+    parsed = urlparse(url)
+    host = parsed.hostname or 'localhost'
+    port = parsed.port or 6379
+    password = parsed.password or ''
+    db = int(parsed.path.lstrip('/')) if parsed.path.lstrip('/') else 0
+    
+    return redis_async.Redis(
+        host=host,
+        port=port,
+        password=password,
+        db=db,
         decode_responses=True,
         socket_timeout=DEFAULT_TIMEOUT,
         socket_connect_timeout=DEFAULT_TIMEOUT,
