@@ -273,6 +273,9 @@ async def start_agent(
 
     request_id = structlog.contextvars.get_contextvars().get('request_id')
 
+    # Log the enqueue operation
+    logger.info(f"📤 ENQUEUED RUN: {agent_run_id} for thread: {thread_id} (model: {model_name})")
+    
     run_agent_background.send(
         agent_run_id=agent_run_id, thread_id=thread_id, instance_id=utils.instance_id,
         project_id=project_id,
@@ -282,6 +285,8 @@ async def start_agent(
         agent_config=agent_config,  # Pass agent configuration
         request_id=request_id,
     )
+    
+    logger.info(f"✅ QUEUE TASK SENT: {agent_run_id}")
 
     return {"agent_run_id": agent_run_id, "status": "running"}
 
@@ -1147,6 +1152,9 @@ async def initiate_agent_with_files(
 
         request_id = structlog.contextvars.get_contextvars().get('request_id')
 
+        # Log the enqueue operation
+        logger.info(f"📤 ENQUEUED RUN: {agent_run_id} for thread: {thread_id} (model: {model_name})")
+
         # Run agent in background
         run_agent_background.send(
             agent_run_id=agent_run_id, thread_id=thread_id, instance_id=utils.instance_id,
@@ -1157,6 +1165,8 @@ async def initiate_agent_with_files(
             agent_config=agent_config,  # Pass agent configuration
             request_id=request_id,
         )
+        
+        logger.info(f"✅ QUEUE TASK SENT: {agent_run_id}")
 
         return {"thread_id": thread_id, "agent_run_id": agent_run_id}
 

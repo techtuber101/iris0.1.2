@@ -112,8 +112,9 @@ async def run_agent_background(
 
     sentry.sentry.set_tag("thread_id", thread_id)
 
-    logger.info(f"🚀 PROCESSING AGENT RUN: {agent_run_id} for thread: {thread_id} (Instance: {instance_id})")
+    logger.info(f"🚀 PROCESSING RUN: {agent_run_id} for thread: {thread_id} (Instance: {instance_id})")
     logger.info(f"📊 Processing parameters: model={model_name}, thinking={enable_thinking}, reasoning={reasoning_effort}, stream={stream}")
+    logger.info(f"✅ WORKER PICKED UP TASK: {agent_run_id}")
     logger.debug({
         "model_name": model_name,
         "enable_thinking": enable_thinking,

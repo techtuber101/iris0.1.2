@@ -509,6 +509,7 @@ async def debug_test_worker():
             asyncio.run(_test())
         
         # Send the task
+        logger.info(f"🧪 Sending test task: {test_key}")
         test_worker_task.send(test_key)
         debug_info["status"] = "task_sent"
         
@@ -520,16 +521,77 @@ async def debug_test_worker():
                 debug_info["status"] = "success"
                 debug_info["result"] = result
                 await redis.delete(test_key)
+                logger.info(f"✅ Test task completed: {test_key}")
                 break
             await asyncio.sleep(1)
         
         if debug_info["status"] == "task_sent":
             debug_info["status"] = "timeout"
             debug_info["errors"].append("Worker did not process task within 10 seconds")
+            logger.warning(f"⏰ Test task timeout: {test_key}")
         
     except Exception as e:
         debug_info["status"] = "error"
         debug_info["errors"].append(str(e))
+        logger.error(f"❌ Test task failed: {e}")
+    
+    return debug_info
+
+@app.get("/debug/queue-status")
+async def debug_queue_status():
+    """Debug endpoint to check queue status and Redis connection."""
+    import dramatiq
+    from core.services import redis
+    
+    debug_info = {
+        "timestamp": datetime.now().isoformat(),
+        "redis_status": {},
+        "dramatiq_status": {},
+        "queue_info": {},
+        "errors": []
+    }
+    
+    try:
+        # Check Redis connection
+        await redis.initialize_async()
+        redis_info = await redis.info()
+        debug_info["redis_status"] = {
+            "connected": True,
+            "version": redis_info.get("redis_version"),
+            "uptime": redis_info.get("uptime_in_seconds"),
+            "connected_clients": redis_info.get("connected_clients"),
+            "used_memory": redis_info.get("used_memory_human"),
+        }
+        
+        # Check Dramatiq broker
+        broker = dramatiq.get_broker()
+        debug_info["dramatiq_status"] = {
+            "broker_type": type(broker).__name__,
+            "is_connected": hasattr(broker, 'client') and broker.client is not None,
+        }
+        
+        # Check queue info
+        if hasattr(broker, 'get_declared_queues'):
+            queues = broker.get_declared_queues()
+            debug_info["queue_info"]["declared_queues"] = list(queues)
+        
+        # Check if we can send a message
+        try:
+            from run_agent_background import check_health
+            test_key = f"queue_test_{uuid.uuid4().hex}"
+            check_health.send(test_key)
+            debug_info["queue_info"]["can_send"] = True
+            logger.info(f"✅ Queue test message sent: {test_key}")
+        except Exception as e:
+            debug_info["queue_info"]["can_send"] = False
+            debug_info["errors"].append(f"Cannot send to queue: {e}")
+            logger.error(f"❌ Queue send failed: {e}")
+        
+    except Exception as e:
+        debug_info["redis_status"]["connected"] = False
+        debug_info["redis_status"]["error"] = str(e)
+        debug_info["errors"].append(f"Redis connection failed: {e}")
+        logger.error(f"❌ Redis connection failed: {e}")
     
     return debug_info
 
