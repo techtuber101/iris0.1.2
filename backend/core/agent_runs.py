@@ -538,7 +538,9 @@ async def stream_agent_run(
             message_queue = asyncio.Queue()
 
             async def listen_messages():
-                listener = pubsub.listen()
+                # Use the pubsub from the outer scope
+                current_pubsub = pubsub
+                listener = current_pubsub.listen()
                 task = asyncio.create_task(listener.__anext__())
                 reconnect_attempts = 0
                 max_reconnect_attempts = 3
@@ -550,7 +552,7 @@ async def stream_agent_run(
                             # Timeout - check if we should reconnect
                             logger.debug(f"Pub/Sub timeout for {agent_run_id}, checking connection health")
                             try:
-                                await asyncio.wait_for(pubsub.ping(), timeout=5.0)
+                                await asyncio.wait_for(current_pubsub.ping(), timeout=5.0)
                                 logger.debug(f"Pub/Sub connection healthy for {agent_run_id}")
                                 task = asyncio.create_task(listener.__anext__())
                                 continue
@@ -560,13 +562,12 @@ async def stream_agent_run(
                                     reconnect_attempts += 1
                                     logger.info(f"Attempting to reconnect Pub/Sub for {agent_run_id} (attempt {reconnect_attempts})")
                                     try:
-                                        await pubsub.unsubscribe(response_channel, control_channel)
-                                        await pubsub.close()
+                                        await current_pubsub.unsubscribe(response_channel, control_channel)
+                                        await current_pubsub.close()
                                         # Create new pubsub connection
-                                        new_pubsub = await redis.create_pubsub()
-                                        await new_pubsub.subscribe(response_channel, control_channel)
-                                        pubsub = new_pubsub
-                                        listener = pubsub.listen()
+                                        current_pubsub = await redis.create_pubsub()
+                                        await current_pubsub.subscribe(response_channel, control_channel)
+                                        listener = current_pubsub.listen()
                                         task = asyncio.create_task(listener.__anext__())
                                         logger.info(f"Successfully reconnected Pub/Sub for {agent_run_id}")
                                         continue
