@@ -42,6 +42,7 @@ const useTourPermissionsStore = create<TourPermissionsState>()(
       partialize: (state) => ({
         hasBeenAsked: state.hasBeenAsked,
         toursEnabled: state.toursEnabled,
+        showWelcome: state.showWelcome,
       }),
     }
   )
