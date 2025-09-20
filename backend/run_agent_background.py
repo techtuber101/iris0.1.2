@@ -67,7 +67,18 @@ async def initialize():
 async def check_health(key: str):
     """Run the agent in the background using Redis for state."""
     structlog.contextvars.clear_contextvars()
-    await _ASYNC_REDIS.set(key, "healthy", ex=rc.REDIS_KEY_TTL)
+    await initialize()
+    if _ASYNC_REDIS:
+        await _ASYNC_REDIS.set(key, "healthy", ex=rc.REDIS_KEY_TTL)
+
+@dramatiq.actor
+async def test_worker_task(key: str):
+    """Test worker task for debugging."""
+    structlog.contextvars.clear_contextvars()
+    await initialize()
+    if _ASYNC_REDIS:
+        await _ASYNC_REDIS.set(key, "processed", ex=rc.REDIS_KEY_TTL)
+        logger.info(f"Test worker task processed key: {key}")
 
 @dramatiq.actor
 async def run_agent_background(
@@ -91,6 +102,9 @@ async def run_agent_background(
         
         # Use the async Redis client for all operations
         redis = _ASYNC_REDIS
+        if not redis:
+            logger.error("Redis client not initialized")
+            return
         
         # Create unique keys for this run
         run_lock_key = f"agent_run_lock:{agent_run_id}"
@@ -123,7 +137,7 @@ async def run_agent_background(
             logger.warning(f"Failed to set instance active key: {e}")
         
         # Create pubsub for real-time updates
-        pubsub = await redis.pubsub()
+        pubsub = redis.pubsub()
         await pubsub.subscribe(response_channel)
         
         # Set instance as running
