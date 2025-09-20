@@ -37,6 +37,12 @@ try:
         class StubBillingIntegration:
             async def check_and_reserve_credits(self, account_id: str):
                 return True, "Billing disabled - unlimited usage", None
+            
+            async def deduct_usage(self, account_id: str, prompt_tokens: int, completion_tokens: int, 
+                                 model: str, message_id: str, cache_read_tokens: int = 0, 
+                                 cache_creation_tokens: int = 0):
+                logger.debug(f"[THREAD_MANAGER] Stub billing: deducting usage for {account_id} - {prompt_tokens}+{completion_tokens} tokens")
+                return True, "Billing disabled - usage not deducted", None
         
         def calculate_token_cost(prompt_tokens: int, completion_tokens: int, model: str):
             from decimal import Decimal
@@ -48,6 +54,12 @@ except ImportError:
     class StubBillingIntegration:
         async def check_and_reserve_credits(self, account_id: str):
             return True, "Billing disabled - unlimited usage", None
+        
+        async def deduct_usage(self, account_id: str, prompt_tokens: int, completion_tokens: int, 
+                             model: str, message_id: str, cache_read_tokens: int = 0, 
+                             cache_creation_tokens: int = 0):
+            logger.debug(f"[THREAD_MANAGER] Stub billing: deducting usage for {account_id} - {prompt_tokens}+{completion_tokens} tokens")
+            return True, "Billing disabled - usage not deducted", None
     
     def calculate_token_cost(prompt_tokens: int, completion_tokens: int, model: str):
         from decimal import Decimal

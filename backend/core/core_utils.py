@@ -11,7 +11,8 @@ from .utils.auth_utils import verify_and_authorize_thread_access
 from core.services import redis_client as rc
 from core.services.supabase import DBConnection
 from core.services.llm import make_llm_api_call
-from run_agent_background import update_agent_run_status, _cleanup_redis_response_list
+from run_agent_background import _cleanup_redis_response_list
+from core.agent_runs import update_agent_run_status
 
 # Global variables (will be set by initialize function)
 db = None
@@ -69,7 +70,7 @@ async def stop_agent_run_with_helpers(agent_run_id: str, error_message: Optional
 
     # Update the agent run status in the database
     update_success = await update_agent_run_status(
-        client, agent_run_id, final_status, error=error_message
+        client, agent_run_id, final_status, error_message=error_message
     )
 
     if not update_success:

@@ -486,49 +486,12 @@ async def stream_agent_run(
     token: Optional[str] = None,
     request: Request = None
 ):
-    """Stream the responses of an agent run using Redis Lists and Pub/Sub."""
-    logger.info(f"🎯 Starting stream for agent run: {agent_run_id}")
-    logger.debug(f"📊 Stream request details: method={request.method if request else 'N/A'}, url={request.url if request else 'N/A'}")
+    """Stream the responses of an agent run using direct EventSource streaming."""
+    logger.debug(f"Starting stream for agent run: {agent_run_id}")
     client = await utils.db.client
 
-    # Check JWT expiration before starting long-lived stream
-    try:
-        user_id = await get_user_id_from_stream_auth(request, token)
-        logger.debug(f"✅ Authentication successful for user {user_id}")
-        
-        # Additional check: if token is close to expiry, warn the client
-        if token:
-            import jwt
-            try:
-                # Decode without verification to check expiration
-                decoded = jwt.decode(token, options={"verify_signature": False})
-                exp_timestamp = decoded.get('exp')
-                if exp_timestamp:
-                    import time
-                    current_time = time.time()
-                    time_until_expiry = exp_timestamp - current_time
-                    
-                    # If token expires in less than 5 minutes, log a warning
-                    if time_until_expiry < 300:  # 5 minutes
-                        logger.warning(f"JWT token for {agent_run_id} expires in {time_until_expiry:.0f} seconds - stream may be interrupted")
-                    
-                    # If token is already expired, reject the request
-                    if time_until_expiry <= 0:
-                        raise HTTPException(status_code=401, detail="JWT token has expired. Please refresh your session.")
-                        
-            except jwt.InvalidTokenError:
-                logger.warning(f"Invalid JWT token format for {agent_run_id}")
-            except Exception as e:
-                logger.debug(f"Could not check JWT expiration for {agent_run_id}: {e}")
-                
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Authentication error for stream {agent_run_id}: {e}")
-        raise HTTPException(status_code=401, detail="Authentication failed")
-    
+    user_id = await get_user_id_from_stream_auth(request, token) # practically instant
     agent_run_data = await get_agent_run_with_access_check(client, agent_run_id, user_id) # 1 db query
-    logger.debug(f"📋 Agent run data retrieved: status={agent_run_data.get('status') if agent_run_data else 'None'}, thread_id={agent_run_data.get('thread_id') if agent_run_data else 'None'}")
 
     structlog.contextvars.bind_contextvars(
         agent_run_id=agent_run_id,
@@ -540,165 +503,79 @@ async def stream_agent_run(
     control_channel = f"agent_run:{agent_run_id}:control" # Global control channel
 
     async def stream_generator(agent_run_data):
-        logger.debug(f"🔄 Starting stream generator for {agent_run_id} using Redis list {response_list_key} and channel {response_channel}")
+        logger.debug(f"Streaming responses for {agent_run_id} using Redis list {response_list_key} and channel {response_channel}")
         last_processed_index = -1
         # Single pubsub used for response + control
         listener_task = None
         terminate_stream = False
         initial_yield_complete = False
-        message_count = 0
-        
-        # Heartbeat tracking
-        import time
-        last_heartbeat = time.monotonic()
-        heartbeat_interval = 15.0  # Send heartbeat every 15 seconds
 
         try:
-            # 1. Send immediate connection events (critical for client feedback)
-            logger.debug(f"📡 Sending immediate connection events for {agent_run_id}")
-            yield "event: open\ndata: ok\n\n"
-            yield f"data: {json.dumps({'type': 'status', 'status': 'connecting', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
-            
-            # 2. Fetch and yield initial responses from Redis list
-            logger.debug(f"🔍 Fetching initial responses for {agent_run_id}")
+            # 1. Fetch and yield initial responses from Redis list
             initial_responses_json = await redis_client.lrange(response_list_key, 0, -1)
             initial_responses = []
             if initial_responses_json:
                 initial_responses = [json.loads(r) for r in initial_responses_json]
-                logger.debug(f"📤 Sending {len(initial_responses)} initial responses for {agent_run_id}")
+                logger.debug(f"Sending {len(initial_responses)} initial responses for {agent_run_id}")
                 for response in initial_responses:
                     yield f"data: {json.dumps(response)}\n\n"
                 last_processed_index = len(initial_responses) - 1
-            else:
-                logger.debug(f"📭 No initial responses found for {agent_run_id}")
             initial_yield_complete = True
 
-            # 3. Check run status and emit appropriate status
+            # 2. Check run status
             current_status = agent_run_data.get('status') if agent_run_data else None
-            logger.debug(f"📊 Agent run {agent_run_id} current status: {current_status}")
 
             if current_status != 'running':
-                logger.info(f"🏁 Agent run {agent_run_id} is not running (status: {current_status}). Ending stream.")
-                yield f"data: {json.dumps({'type': 'status', 'status': 'completed', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
-                yield "event: close\ndata: stream-ended\n\n"
+                logger.debug(f"Agent run {agent_run_id} is not running (status: {current_status}). Ending stream.")
+                yield f"data: {json.dumps({'type': 'status', 'status': 'completed'})}\n\n"
                 return
-            
-            # 4. Emit processing status
-            logger.debug(f"🔄 Agent run {agent_run_id} is running, starting stream processing")
-            yield f"data: {json.dumps({'type': 'status', 'status': 'processing', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
           
             structlog.contextvars.bind_contextvars(
                 thread_id=agent_run_data.get('thread_id'),
             )
 
-            # 3. Use a dedicated Pub/Sub connection for streaming
-            pubsub = await redis_client.create_dedicated_pubsub()
+            # 3. Use a single Pub/Sub connection subscribed to both channels
+            pubsub = await redis_client.create_pubsub()
             await pubsub.subscribe(response_channel, control_channel)
             logger.debug(f"Subscribed to channels: {response_channel}, {control_channel}")
-            
-            # Also subscribe to per-thread channel for direct streaming
-            thread_channel = f"thread:{agent_run_data.get('thread_id')}"
-            await pubsub.subscribe(thread_channel)
-            logger.debug(f"Also subscribed to thread channel: {thread_channel}")
 
             # Queue to communicate between listeners and the main generator loop
             message_queue = asyncio.Queue()
 
             async def listen_messages():
-                # Use the pubsub from the outer scope
-                current_pubsub = pubsub
-                listener = current_pubsub.listen()
+                listener = pubsub.listen()
                 task = asyncio.create_task(listener.__anext__())
-                reconnect_attempts = 0
-                max_reconnect_attempts = 3
 
                 while not terminate_stream:
-                    try:
-                        done, _ = await asyncio.wait([task], return_when=asyncio.FIRST_COMPLETED, timeout=30.0)
-                        if not done:
-                            # Timeout - check if we should reconnect
-                            logger.debug(f"Pub/Sub timeout for {agent_run_id}, checking connection health")
-                            try:
-                                await asyncio.wait_for(current_pubsub.ping(), timeout=5.0)
-                                logger.debug(f"Pub/Sub connection healthy for {agent_run_id}")
+                    done, _ = await asyncio.wait([task], return_when=asyncio.FIRST_COMPLETED)
+                    for finished in done:
+                        try:
+                            message = finished.result()
+                            if message and isinstance(message, dict) and message.get("type") == "message":
+                                channel = message.get("channel")
+                                data = message.get("data")
+                                if isinstance(data, bytes):
+                                    data = data.decode('utf-8')
+
+                                if channel == response_channel and data == "new":
+                                    await message_queue.put({"type": "new_response"})
+                                elif channel == control_channel and data in ["STOP", "END_STREAM", "ERROR"]:
+                                    logger.debug(f"Received control signal '{data}' for {agent_run_id}")
+                                    await message_queue.put({"type": "control", "data": data})
+                                    return  # Stop listening on control signal
+
+                        except StopAsyncIteration:
+                            logger.warning(f"Listener stopped for {agent_run_id}.")
+                            await message_queue.put({"type": "error", "data": "Listener stopped unexpectedly"})
+                            return
+                        except Exception as e:
+                            logger.error(f"Error in listener for {agent_run_id}: {e}")
+                            await message_queue.put({"type": "error", "data": "Listener failed"})
+                            return
+                        finally:
+                            # Resubscribe to the next message if continuing
+                            if not terminate_stream:
                                 task = asyncio.create_task(listener.__anext__())
-                                continue
-                            except Exception as ping_error:
-                                logger.warning(f"Pub/Sub connection unhealthy for {agent_run_id}: {ping_error}")
-                                if reconnect_attempts < max_reconnect_attempts:
-                                    reconnect_attempts += 1
-                                    logger.info(f"Attempting to reconnect Pub/Sub for {agent_run_id} (attempt {reconnect_attempts})")
-                                    try:
-                                        await current_pubsub.unsubscribe(response_channel, control_channel)
-                                        await current_pubsub.close()
-                                        # Create new pubsub connection
-                                        current_pubsub = await redis_client.create_pubsub()
-                                        await current_pubsub.subscribe(response_channel, control_channel)
-                                        listener = current_pubsub.listen()
-                                        task = asyncio.create_task(listener.__anext__())
-                                        logger.info(f"Successfully reconnected Pub/Sub for {agent_run_id}")
-                                        continue
-                                    except Exception as reconnect_error:
-                                        logger.error(f"Failed to reconnect Pub/Sub for {agent_run_id}: {reconnect_error}")
-                                        await message_queue.put({"type": "error", "data": "Connection lost and reconnection failed"})
-                                        return
-                                else:
-                                    logger.error(f"Max reconnection attempts reached for {agent_run_id}")
-                                    await message_queue.put({"type": "error", "data": "Connection lost"})
-                                    return
-                        
-                        for finished in done:
-                            try:
-                                message = finished.result()
-                                if message and isinstance(message, dict) and message.get("type") == "message":
-                                    channel = message.get("channel")
-                                    data = message.get("data")
-                                    # Async client uses decode_responses=True, so data should be string
-                                    # But handle both cases for safety
-                                    if isinstance(data, bytes):
-                                        data = data.decode('utf-8')
-                                    elif isinstance(data, str):
-                                        # Already decoded by async client
-                                        pass
-                                    else:
-                                        # Convert other types to string
-                                        data = str(data)
-
-                                    if channel == response_channel and data == "new":
-                                        await message_queue.put({"type": "new_response"})
-                                    elif channel == thread_channel:
-                                        # Direct streaming event from agent execution
-                                        try:
-                                            event_data = json.loads(data)
-                                            await message_queue.put({"type": "direct_stream", "data": event_data})
-                                        except json.JSONDecodeError:
-                                            logger.warning(f"Failed to parse direct stream event: {data}")
-                                    elif channel == control_channel and data in ["STOP", "END_STREAM", "ERROR"]:
-                                        logger.debug(f"Received control signal '{data}' for {agent_run_id}")
-                                        await message_queue.put({"type": "control", "data": data})
-                                        return  # Stop listening on control signal
-
-                            except StopAsyncIteration:
-                                logger.warning(f"Listener stopped for {agent_run_id}.")
-                                await message_queue.put({"type": "error", "data": "Listener stopped unexpectedly"})
-                                return
-                            except Exception as e:
-                                logger.error(f"Error in listener for {agent_run_id}: {e}")
-                                await message_queue.put({"type": "error", "data": "Listener failed"})
-                                return
-                            finally:
-                                # Resubscribe to the next message if continuing
-                                if not terminate_stream:
-                                    task = asyncio.create_task(listener.__anext__())
-                    
-                    except asyncio.TimeoutError:
-                        logger.debug(f"Pub/Sub timeout for {agent_run_id}, continuing...")
-                        task = asyncio.create_task(listener.__anext__())
-                        continue
-                    except Exception as e:
-                        logger.error(f"Unexpected error in listen_messages for {agent_run_id}: {e}")
-                        await message_queue.put({"type": "error", "data": "Unexpected error in listener"})
-                        return
 
 
             listener_task = asyncio.create_task(listen_messages())
@@ -706,30 +583,7 @@ async def stream_agent_run(
             # 4. Main loop to process messages from the queue
             while not terminate_stream:
                 try:
-                    # Check if client disconnected
-                    if await request.is_disconnected():
-                        logger.debug(f"Client disconnected for {agent_run_id}")
-                        terminate_stream = True
-                        break
-                    
-                    # Check for heartbeat timeout
-                    now = time.monotonic()
-                    if now - last_heartbeat > heartbeat_interval:
-                        try:
-                            yield ":keepalive\n\n"  # SSE comment frame keeps connection alive
-                            last_heartbeat = now
-                            logger.debug(f"Sent heartbeat for {agent_run_id}")
-                        except Exception as heartbeat_error:
-                            logger.debug(f"Failed to send heartbeat for {agent_run_id}: {heartbeat_error}")
-                            terminate_stream = True
-                            break
-
-                    # Try to get a message with a short timeout to allow heartbeat checks
-                    try:
-                        queue_item = await asyncio.wait_for(message_queue.get(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        # No message, continue to check heartbeat
-                        continue
+                    queue_item = await message_queue.get()
 
                     if queue_item["type"] == "new_response":
                         # Fetch new responses from Redis list starting after the last processed index
@@ -739,35 +593,16 @@ async def stream_agent_run(
                         if new_responses_json:
                             new_responses = [json.loads(r) for r in new_responses_json]
                             num_new = len(new_responses)
-                            message_count += num_new
-                            logger.debug(f"📨 Processing {num_new} new responses for {agent_run_id} (total: {message_count})")
-                            
-                            for i, response in enumerate(new_responses):
-                                # Log first token
-                                if message_count == 1 and response.get('type') == 'token':
-                                    logger.debug(f"🎯 FIRST TOKEN for {agent_run_id}: {response.get('content', '')[:50]}...")
-                                
+                            # logger.debug(f"Received {num_new} new responses for {agent_run_id} (index {new_start_index} onwards)")
+                            for response in new_responses:
                                 yield f"data: {json.dumps(response)}\n\n"
-                                
                                 # Check if this response signals completion
                                 if response.get('type') == 'status' and response.get('status') in ['completed', 'failed', 'stopped']:
-                                    logger.info(f"🏁 Detected run completion via status message: {response.get('status')}")
+                                    logger.debug(f"Detected run completion via status message in stream: {response.get('status')}")
                                     terminate_stream = True
                                     break # Stop processing further new responses
                             last_processed_index += num_new
                         if terminate_stream: break
-
-                    elif queue_item["type"] == "direct_stream":
-                        # Handle direct streaming events from agent execution
-                        event_data = queue_item["data"]
-                        logger.debug(f"📡 Direct stream event for {agent_run_id}: {event_data.get('type', 'unknown')}")
-                        yield f"data: {json.dumps(event_data)}\n\n"
-                        
-                        # Check if this is a completion event
-                        if event_data.get('type') == 'done':
-                            logger.info(f"🏁 Direct stream completion for {agent_run_id}")
-                            terminate_stream = True
-                            break
 
                     elif queue_item["type"] == "control":
                         control_signal = queue_item["data"]
@@ -798,16 +633,10 @@ async def stream_agent_run(
                  yield f"data: {json.dumps({'type': 'status', 'status': 'error', 'message': f'Failed to start stream: {e}'})}\n\n"
         finally:
             terminate_stream = True
-            # Send close event
-            try:
-                yield "event: close\ndata: stream-ended\n\n"
-            except Exception:
-                pass  # Client may have disconnected
-            
             # Graceful shutdown order: unsubscribe → close → cancel
             try:
                 if 'pubsub' in locals() and pubsub:
-                    await pubsub.unsubscribe(response_channel, control_channel, thread_channel)
+                    await pubsub.unsubscribe(response_channel, control_channel)
                     await pubsub.close()
             except Exception as e:
                 logger.debug(f"Error during pubsub cleanup for {agent_run_id}: {e}")
@@ -1206,4 +1035,31 @@ async def initiate_agent_with_files(
         logger.error(f"Error in agent initiation: {str(e)}\n{traceback.format_exc()}")
         # TODO: Clean up created project/thread if initiation fails mid-way
         raise HTTPException(status_code=500, detail=f"Failed to initiate agent session: {str(e)}")
+
+async def update_agent_run_status(client, agent_run_id: str, status: str, error_message: Optional[str] = None):
+    """Update the status of an agent run in the database."""
+    try:
+        update_data = {
+            'status': status,
+            'updated_at': datetime.now(timezone.utc).isoformat()
+        }
+        
+        if error_message:
+            update_data['error'] = error_message
+        
+        if status in ['completed', 'failed', 'stopped']:
+            update_data['completed_at'] = datetime.now(timezone.utc).isoformat()
+        
+        result = await client.table('agent_runs').update(update_data).eq('id', agent_run_id).execute()
+        
+        if result.data:
+            logger.info(f"✅ Agent run {agent_run_id} status updated to {status}")
+            return True
+        else:
+            logger.error(f"❌ Failed to update agent run {agent_run_id} status - no rows affected")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Error updating agent run {agent_run_id} status: {e}")
+        return False
 

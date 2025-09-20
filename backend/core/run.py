@@ -599,6 +599,7 @@ class AgentRunner:
         logger.debug(f"model_name received: {self.config.model_name}")
         iteration_count = 0
         continue_execution = True
+        error_detected = False
 
         latest_user_message = await self.client.table('messages').select('*').eq('thread_id', self.config.thread_id).eq('type', 'user').order('created_at', desc=True).limit(1).execute()
         if latest_user_message.data and len(latest_user_message.data) > 0:
@@ -629,6 +630,12 @@ class AgentRunner:
                 message_type = latest_message.data[0].get('type')
                 if message_type == 'assistant':
                     continue_execution = False
+                    # Emit completion status when agent already has an assistant response
+                    yield {
+                        "type": "status",
+                        "status": "completed",
+                        "message": "Agent execution completed - assistant response already exists"
+                    }
                     break
 
             temporary_message = None
@@ -724,7 +731,6 @@ class AgentRunner:
 
                 last_tool_call = None
                 agent_should_terminate = False
-                error_detected = False
                 full_response = ""
 
                 try:
@@ -809,6 +815,13 @@ class AgentRunner:
                         if generation:
                             generation.end(output=full_response, status_message="agent_stopped")
                         continue_execution = False
+                        
+                        # Emit completion status to notify the client
+                        yield {
+                            "type": "status",
+                            "status": "completed",
+                            "message": "Agent execution completed successfully"
+                        }
 
                 except Exception as e:
                     error_msg = f"Error during response streaming: {str(e)}"
@@ -832,6 +845,20 @@ class AgentRunner:
             
             if generation:
                 generation.end(output=full_response)
+
+        # Emit final completion status if we exited the loop without an error
+        if not error_detected and iteration_count >= self.config.max_iterations:
+            yield {
+                "type": "status",
+                "status": "completed",
+                "message": f"Agent execution completed after {iteration_count} iterations"
+            }
+        elif not error_detected and not continue_execution:
+            yield {
+                "type": "status",
+                "status": "completed",
+                "message": "Agent execution completed successfully"
+            }
 
         asyncio.create_task(asyncio.to_thread(lambda: langfuse.flush()))
 
