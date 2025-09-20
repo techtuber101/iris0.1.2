@@ -11,7 +11,7 @@ from core.tools.utils.mcp_connection_manager import MCPConnectionManager
 from core.tools.utils.custom_mcp_handler import CustomMCPHandler
 from core.tools.utils.dynamic_tool_builder import DynamicToolBuilder
 from core.tools.utils.mcp_tool_executor import MCPToolExecutor
-from core.services import redis as redis_service
+from core.services import redis_client as redis_service
 
 
 class MCPSchemaRedisCache:

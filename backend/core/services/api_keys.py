@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 from fastapi import HTTPException
 from core.utils.logger import logger
 from core.services.supabase import DBConnection
-from core.services import redis
+from core.services import redis_client
 from core.utils.config import config
 
 
@@ -353,7 +353,7 @@ class APIKeyService:
             cache_key = f"api_key:{public_key}:{self._hash_secret_key(secret_key)[:8]}"
 
             try:
-                redis_client = await redis.get_client()
+                redis_client = await redis_client.get_client()
                 cached_result = await redis_client.get(cache_key)
                 if cached_result:
                     import json
@@ -458,7 +458,7 @@ class APIKeyService:
     ):
         """Cache validation result in Redis"""
         try:
-            redis_client = await redis.get_client()
+            redis_client = await redis_client.get_client()
             import json
 
             cache_data = {
@@ -478,7 +478,7 @@ class APIKeyService:
 
         # Try Redis first
         try:
-            redis_client = await redis.get_client()
+            redis_client = await redis_client.get_client()
             throttle_key = f"last_used_throttle:{key_id}"
 
             # Check if we've updated this key recently
@@ -533,7 +533,7 @@ class APIKeyService:
     async def _clear_throttle(self, key_id: str):
         """Clear the throttle for a specific key (useful for testing)"""
         try:
-            redis_client = await redis.get_client()
+            redis_client = await redis_client.get_client()
             throttle_key = f"last_used_throttle:{key_id}"
             await redis_client.delete(throttle_key)
             logger.debug(f"Cleared throttle for key {key_id}")

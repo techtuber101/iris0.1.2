@@ -207,8 +207,8 @@ class AppService:
     async def _get_by_slug(self, app_slug: str) -> Optional[App]:
         cache_key = f"pipedream:app:{app_slug}"
         try:
-            from core.services import redis
-            redis_client = await redis.get_client()
+            from core.services import redis_client
+            redis_client = await redis_client.get_client()
             cached_data = await redis_client.get(cache_key)
             
             if cached_data:
@@ -232,8 +232,8 @@ class AppService:
                     app = self._map_to_domain(exact_match)
                     
                     try:
-                        from core.services import redis
-                        redis_client = await redis.get_client()
+                        from core.services import redis_client
+                        redis_client = await redis_client.get_client()
                         app_data = self._map_domain_app_to_cache(app)
                         await redis_client.setex(cache_key, 21600, json.dumps(app_data))
                         logger.debug(f"Cached app: {app_slug}")

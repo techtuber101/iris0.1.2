@@ -1,4 +1,4 @@
-import redis.asyncio as redis
+import redis_client.asyncio as redis
 import os
 from dotenv import load_dotenv
 import asyncio
@@ -7,8 +7,8 @@ from typing import List, Any
 from core.utils.retry import retry
 
 # Redis client and connection pool
-client: redis.Redis | None = None
-pool: redis.ConnectionPool | None = None
+client: redis_client.Redis | None = None
+pool: redis_client.ConnectionPool | None = None
 _initialized = False
 _init_lock = asyncio.Lock()
 
@@ -37,7 +37,7 @@ def initialize():
     logger.debug(f"Initializing Redis connection pool to {redis_host}:{redis_port} with max {max_connections} connections")
 
     # Create connection pool with production-optimized settings
-    pool = redis.ConnectionPool(
+    pool = redis_client.ConnectionPool(
         host=redis_host,
         port=redis_port,
         password=redis_password,
@@ -51,7 +51,7 @@ def initialize():
     )
 
     # Create Redis client from connection pool
-    client = redis.Redis(connection_pool=pool)
+    client = redis_client.Redis(connection_pool=pool)
 
     return client
 

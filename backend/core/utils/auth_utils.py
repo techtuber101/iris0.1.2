@@ -10,7 +10,7 @@ import base64
 import hashlib
 import hmac
 from core.services.supabase import DBConnection
-from core.services import redis
+from core.services import redis_client
 
 async def verify_admin_api_key(x_admin_api_key: Optional[str] = Header(None)):
     if not config.KORTIX_ADMIN_API_KEY:
@@ -48,7 +48,7 @@ async def _get_user_id_from_account_cached(account_id: str) -> Optional[str]:
     cache_key = f"account_user:{account_id}"
     
     try:
-        redis_client = await redis.get_client()
+        redis_client = await redis_client.get_client()
         cached_user_id = await redis_client.get(cache_key)
         if cached_user_id:
             return cached_user_id.decode('utf-8') if isinstance(cached_user_id, bytes) else cached_user_id

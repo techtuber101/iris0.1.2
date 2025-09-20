@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, Optional
 
 from core.services.supabase import DBConnection
-from core.services import redis
+from core.services import redis_client
 from core.utils.logger import logger, structlog
 from core.utils.config import config
 from run_agent_background import run_agent_background
@@ -449,7 +449,7 @@ class AgentExecutor:
     async def _register_agent_run(self, agent_run_id: str) -> None:
         try:
             instance_key = f"active_run:trigger_executor:{agent_run_id}"
-            await redis.set(instance_key, "running", ex=redis.REDIS_KEY_TTL)
+            await redis_client.set(instance_key, "running", ex=redis_client.REDIS_KEY_TTL)
         except Exception as e:
             logger.warning(f"Failed to register agent run in Redis: {e}")
 
@@ -765,7 +765,7 @@ class WorkflowExecutor:
         try:
             instance_id = getattr(config, 'INSTANCE_ID', 'default')
             instance_key = f"active_run:{instance_id}:{agent_run_id}"
-            await redis.set(instance_key, "running", ex=redis.REDIS_KEY_TTL)
+            await redis_client.set(instance_key, "running", ex=redis_client.REDIS_KEY_TTL)
         except Exception as e:
             logger.warning(f"Failed to register workflow run in Redis: {e}")
 

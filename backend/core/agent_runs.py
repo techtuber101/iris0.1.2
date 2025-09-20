@@ -41,7 +41,7 @@ except ImportError:
     billing_integration = StubBillingIntegration()
 
 from core.utils.config import config
-from core.services import redis
+from core.services import redis_client
 from core.sandbox.sandbox import create_sandbox, delete_sandbox
 from run_agent_background import run_agent_background
 from core.ai_models import model_manager
@@ -267,7 +267,7 @@ async def start_agent(
 
     instance_key = f"active_run:{utils.instance_id}:{agent_run_id}"
     try:
-        await redis.set(instance_key, "running", ex=redis.REDIS_KEY_TTL)
+        await redis_client.set(instance_key, "running", ex=redis_client.REDIS_KEY_TTL)
     except Exception as e:
         logger.warning(f"Failed to register agent run in Redis ({instance_key}): {str(e)}")
 
@@ -561,7 +561,7 @@ async def stream_agent_run(
             
             # 2. Fetch and yield initial responses from Redis list
             logger.info(f"🔍 Fetching initial responses for {agent_run_id}")
-            initial_responses_json = await redis.lrange(response_list_key, 0, -1)
+            initial_responses_json = await redis_client.lrange(response_list_key, 0, -1)
             initial_responses = []
             if initial_responses_json:
                 initial_responses = [json.loads(r) for r in initial_responses_json]
@@ -592,7 +592,7 @@ async def stream_agent_run(
             )
 
             # 3. Use a single Pub/Sub connection subscribed to both channels
-            pubsub = await redis.create_pubsub()
+            pubsub = await redis_client.create_pubsub()
             await pubsub.subscribe(response_channel, control_channel)
             logger.debug(f"Subscribed to channels: {response_channel}, {control_channel}")
 
@@ -627,7 +627,7 @@ async def stream_agent_run(
                                         await current_pubsub.unsubscribe(response_channel, control_channel)
                                         await current_pubsub.close()
                                         # Create new pubsub connection
-                                        current_pubsub = await redis.create_pubsub()
+                                        current_pubsub = await redis_client.create_pubsub()
                                         await current_pubsub.subscribe(response_channel, control_channel)
                                         listener = current_pubsub.listen()
                                         task = asyncio.create_task(listener.__anext__())
@@ -714,7 +714,7 @@ async def stream_agent_run(
                     if queue_item["type"] == "new_response":
                         # Fetch new responses from Redis list starting after the last processed index
                         new_start_index = last_processed_index + 1
-                        new_responses_json = await redis.lrange(response_list_key, new_start_index, -1)
+                        new_responses_json = await redis_client.lrange(response_list_key, new_start_index, -1)
 
                         if new_responses_json:
                             new_responses = [json.loads(r) for r in new_responses_json]
@@ -1146,7 +1146,7 @@ async def initiate_agent_with_files(
         # Register run in Redis
         instance_key = f"active_run:{utils.instance_id}:{agent_run_id}"
         try:
-            await redis.set(instance_key, "running", ex=redis.REDIS_KEY_TTL)
+            await redis_client.set(instance_key, "running", ex=redis_client.REDIS_KEY_TTL)
         except Exception as e:
             logger.warning(f"Failed to register agent run in Redis ({instance_key}): {str(e)}")
 
