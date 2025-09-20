@@ -26,7 +26,7 @@ def run_api():
         # Use the same command as railway.json
         cmd = [
             "uv", "run", "python", "-m", "uvicorn", 
-            "core.run:app", 
+            "api:app", 
             "--host", "0.0.0.0", 
             "--port", os.getenv("PORT", "8000"),
             "--timeout-keep-alive", "75",
