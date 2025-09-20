@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, HTTPException, Response, Depends, APIRoute
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from core.services import redis_client
+from core.services import rc as rc
 import sentry
 from contextlib import asynccontextmanager
 from core.agentpress.thread_manager import ThreadManager
@@ -78,9 +78,9 @@ async def lifespan(app: FastAPI):
         logger.info("Sandbox API initialized")
         
         # Initialize Redis connection (optional)
-        from core.services import redis_client
+        from core.services import rc as rc
         try:
-            await redis_client.initialize_async()
+            await rc.initialize_async()
             logger.debug("Redis connection initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Redis connection: {e}")
@@ -130,7 +130,7 @@ async def lifespan(app: FastAPI):
         
         try:
             logger.debug("Closing Redis connection")
-            await redis_client.close()
+            await rc.close()
             logger.debug("Redis connection closed successfully")
         except Exception as e:
             logger.error(f"Error closing Redis connection: {e}")
@@ -332,7 +332,7 @@ async def health_check():
 async def health_check():
     logger.debug("Health docker check endpoint called")
     try:
-        client = await redis_client.get_client()
+        client = await rc.get_client()
         await client.ping()
         db = DBConnection()
         await db.initialize()
@@ -400,7 +400,7 @@ async def debug_worker_status():
     """Debug endpoint to check worker status and Redis connection."""
     import os
     import psutil
-    from core.services import redis_client
+    from core.services import rc as rc
     import dramatiq
     from dramatiq.brokers.redis import RedisBroker
     
@@ -427,8 +427,8 @@ async def debug_worker_status():
     
     # Check Redis connection
     try:
-        await redis_client.initialize_async()
-        client = await redis_client.get_client()
+        await rc.initialize_async()
+        client = await rc.get_client()
         await client.ping()
         debug_info["redis_connection"] = {
             "status": "connected",
@@ -481,7 +481,7 @@ async def debug_test_worker():
     """Test if worker can process a simple task."""
     import dramatiq
     import uuid
-    from core.services import redis_client
+    from core.services import rc as rc
     
     test_key = f"worker_test_{uuid.uuid4().hex}"
     debug_info = {
@@ -499,12 +499,12 @@ async def debug_test_worker():
         @dramatiq.actor
         def test_worker_task(key: str):
             import asyncio
-            from core.services import redis_client
+            from core.services import rc as rc
             
             async def _test():
-                await redis_client.initialize_async()
-                await redis_client.set(key, "worker_test_passed", ex=60)
-                await redis_client.close()
+                await rc.initialize_async()
+                await rc.set(key, "worker_test_passed", ex=60)
+                await rc.close()
             
             asyncio.run(_test())
         
@@ -514,13 +514,13 @@ async def debug_test_worker():
         debug_info["status"] = "task_sent"
         
         # Wait for result
-        await redis_client.initialize_async()
+        await rc.initialize_async()
         for i in range(10):  # Wait up to 10 seconds
-            result = await redis_client.get(test_key)
+            result = await rc.get(test_key)
             if result:
                 debug_info["status"] = "success"
                 debug_info["result"] = result
-                await redis_client.delete(test_key)
+                await rc.delete(test_key)
                 logger.info(f"✅ Test task completed: {test_key}")
                 break
             await asyncio.sleep(1)
@@ -541,7 +541,7 @@ async def debug_test_worker():
 async def debug_queue_status():
     """Debug endpoint to check queue status and Redis connection."""
     import dramatiq
-    from core.services import redis_client
+    from core.services import rc as rc
     
     debug_info = {
         "timestamp": datetime.now().isoformat(),
@@ -553,8 +553,8 @@ async def debug_queue_status():
     
     try:
         # Check Redis connection
-        await redis_client.initialize_async()
-        client = await redis_client.get_client()
+        await rc.initialize_async()
+        client = await rc.get_client()
         # Test Redis connection with a simple ping
         await client.ping()
         debug_info["redis_status"] = {

@@ -8,21 +8,10 @@ from .utils.cache import Cache
 from .utils.logger import logger
 from .utils.config import config
 from .utils.auth_utils import verify_and_authorize_thread_access
-from core.services import redis_client
+from core.services import rc as rc
 from core.services.supabase import DBConnection
 from core.services.llm import make_llm_api_call
-# Import run_agent_background functions conditionally to avoid Dramatiq broker setup in main API
-try:
-    from run_agent_background import update_agent_run_status, _cleanup_redis_response_list
-except ImportError:
-    # Fallback functions if run_agent_background is not available
-    def update_agent_run_status(*args, **kwargs):
-        logger.warning("update_agent_run_status not available - run_agent_background not imported")
-        return None
-    
-    def _cleanup_redis_response_list(*args, **kwargs):
-        logger.warning("_cleanup_redis_response_list not available - run_agent_background not imported")
-        return None
+from run_agent_background import update_agent_run_status, _cleanup_redis_response_list
 
 # Global variables (will be set by initialize function)
 db = None
@@ -40,7 +29,7 @@ async def cleanup():
     # Use the instance_id to find and clean up this instance's keys
     try:
         if instance_id: # Ensure instance_id is set
-            running_keys = await redis_client.keys(f"active_run:{instance_id}:*")
+            running_keys = await rc.keys(f"active_run:{instance_id}:*")
             logger.debug(f"Found {len(running_keys)} running agent runs for instance {instance_id} to clean up")
 
             for key in running_keys:
@@ -58,7 +47,7 @@ async def cleanup():
         logger.error(f"Failed to clean up running agent runs: {str(e)}")
 
     # Close Redis connection
-    await redis_client.close()
+    await rc.close()
     logger.debug("Completed cleanup of agent API resources")
 
 async def stop_agent_run_with_helpers(agent_run_id: str, error_message: Optional[str] = None):
@@ -71,7 +60,7 @@ async def stop_agent_run_with_helpers(agent_run_id: str, error_message: Optional
     response_list_key = f"agent_run:{agent_run_id}:responses"
     all_responses = []
     try:
-        all_responses_json = await redis_client.lrange(response_list_key, 0, -1)
+        all_responses_json = await rc.lrange(response_list_key, 0, -1)
         all_responses = [json.loads(r) for r in all_responses_json]
         logger.debug(f"Fetched {len(all_responses)} responses from Redis for DB update on stop/fail: {agent_run_id}")
     except Exception as e:
@@ -90,14 +79,14 @@ async def stop_agent_run_with_helpers(agent_run_id: str, error_message: Optional
     # Send STOP signal to the global control channel
     global_control_channel = f"agent_run:{agent_run_id}:control"
     try:
-        await redis_client.publish(global_control_channel, "STOP")
+        await rc.publish(global_control_channel, "STOP")
         logger.debug(f"Published STOP signal to global channel {global_control_channel}")
     except Exception as e:
         logger.error(f"Failed to publish STOP signal to global channel {global_control_channel}: {str(e)}")
 
     # Find all instances handling this agent run and send STOP to instance-specific channels
     try:
-        instance_keys = await redis_client.keys(f"active_run:*:{agent_run_id}")
+        instance_keys = await rc.keys(f"active_run:*:{agent_run_id}")
         logger.debug(f"Found {len(instance_keys)} active instance keys for agent run {agent_run_id}")
 
         for key in instance_keys:
@@ -107,7 +96,7 @@ async def stop_agent_run_with_helpers(agent_run_id: str, error_message: Optional
                 instance_id_from_key = parts[1]
                 instance_control_channel = f"agent_run:{agent_run_id}:control:{instance_id_from_key}"
                 try:
-                    await redis_client.publish(instance_control_channel, "STOP")
+                    await rc.publish(instance_control_channel, "STOP")
                     logger.debug(f"Published STOP signal to instance channel {instance_control_channel}")
                 except Exception as e:
                     logger.warning(f"Failed to publish STOP signal to instance channel {instance_control_channel}: {str(e)}")
@@ -360,7 +349,7 @@ def initialize(
 async def _cleanup_redis_response_list(agent_run_id: str):
     try:
         response_list_key = f"agent_run:{agent_run_id}:responses"
-        await redis_client.delete(response_list_key)
+        await rc.delete(response_list_key)
         logger.debug(f"Cleaned up Redis response list for agent run {agent_run_id}")
     except Exception as e:
         logger.warning(f"Failed to clean up Redis response list for {agent_run_id}: {str(e)}")
@@ -395,7 +384,7 @@ async def stop_agent_run(db, agent_run_id: str, error_message: Optional[str] = N
     response_list_key = f"agent_run:{agent_run_id}:responses"
     all_responses = []
     try:
-        all_responses_json = await redis_client.lrange(response_list_key, 0, -1)
+        all_responses_json = await rc.lrange(response_list_key, 0, -1)
         all_responses = [json.loads(r) for r in all_responses_json]
         logger.debug(f"Fetched {len(all_responses)} responses from Redis for DB update on stop/fail: {agent_run_id}")
     except Exception as e:
@@ -410,13 +399,13 @@ async def stop_agent_run(db, agent_run_id: str, error_message: Optional[str] = N
 
     global_control_channel = f"agent_run:{agent_run_id}:control"
     try:
-        await redis_client.publish(global_control_channel, "STOP")
+        await rc.publish(global_control_channel, "STOP")
         logger.debug(f"Published STOP signal to global channel {global_control_channel}")
     except Exception as e:
         logger.error(f"Failed to publish STOP signal to global channel {global_control_channel}: {str(e)}")
 
     try:
-        instance_keys = await redis_client.keys(f"active_run:*:{agent_run_id}")
+        instance_keys = await rc.keys(f"active_run:*:{agent_run_id}")
         logger.debug(f"Found {len(instance_keys)} active instance keys for agent run {agent_run_id}")
 
         for key in instance_keys:
@@ -425,7 +414,7 @@ async def stop_agent_run(db, agent_run_id: str, error_message: Optional[str] = N
                 instance_id_from_key = parts[1]
                 instance_control_channel = f"agent_run:{agent_run_id}:control:{instance_id_from_key}"
                 try:
-                    await redis_client.publish(instance_control_channel, "STOP")
+                    await rc.publish(instance_control_channel, "STOP")
                     logger.debug(f"Published STOP signal to instance channel {instance_control_channel}")
                 except Exception as e:
                     logger.warning(f"Failed to publish STOP signal to instance channel {instance_control_channel}: {str(e)}")
