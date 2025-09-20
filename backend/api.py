@@ -430,6 +430,8 @@ else:
 
 # Include main API router
 app.include_router(api_router, prefix="/api")
+# Also include core API routes at root level for backward compatibility
+app.include_router(core_api.router)
 app.include_router(transcription_api.router)
 
 # Routes are logged in the startup event handler above
