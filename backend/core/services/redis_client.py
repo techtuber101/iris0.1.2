@@ -39,7 +39,7 @@ def build_sync_client():
             port=port,
             password=password,
             db=db,
-            decode_responses=True,
+            decode_responses=False,  # Keep as bytes for Dramatiq compatibility
             socket_timeout=DEFAULT_TIMEOUT,
             socket_connect_timeout=DEFAULT_TIMEOUT,
             socket_keepalive=True,
@@ -49,7 +49,7 @@ def build_sync_client():
     except Exception as e:
         log.error(f"Failed to build sync Redis client: {e}")
         # Return a dummy client that will fail gracefully
-        return redis.Redis(host='localhost', port=6379, decode_responses=True)
+        return redis.Redis(host='localhost', port=6379, decode_responses=False)
 
 def build_async_client():
     try:
