@@ -438,18 +438,21 @@ app.include_router(core_api.router)
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    
+
     workers = 4
     port = int(os.getenv("PORT", 8000))
-    
+
     logger.debug(f"Starting server on 0.0.0.0:{port} with {workers} workers")
     uvicorn.run(
-        "api:app", 
-        host="0.0.0.0", 
+        "api:app",
+        host="0.0.0.0",
         port=port,
         workers=workers,
-        loop="asyncio"
+        loop="asyncio",
+        timeout_keep_alive=75,  # Keep connections alive for 75 seconds
+        proxy_headers=True,     # Handle proxy headers properly
+        forwarded_allow_ips="*" # Allow forwarded IPs from proxies
     )

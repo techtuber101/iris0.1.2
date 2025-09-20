@@ -485,7 +485,41 @@ async def stream_agent_run(
     logger.debug(f"Starting stream for agent run: {agent_run_id}")
     client = await utils.db.client
 
-    user_id = await get_user_id_from_stream_auth(request, token) # practically instant
+    # Check JWT expiration before starting long-lived stream
+    try:
+        user_id = await get_user_id_from_stream_auth(request, token)
+        
+        # Additional check: if token is close to expiry, warn the client
+        if token:
+            import jwt
+            try:
+                # Decode without verification to check expiration
+                decoded = jwt.decode(token, options={"verify_signature": False})
+                exp_timestamp = decoded.get('exp')
+                if exp_timestamp:
+                    import time
+                    current_time = time.time()
+                    time_until_expiry = exp_timestamp - current_time
+                    
+                    # If token expires in less than 5 minutes, log a warning
+                    if time_until_expiry < 300:  # 5 minutes
+                        logger.warning(f"JWT token for {agent_run_id} expires in {time_until_expiry:.0f} seconds - stream may be interrupted")
+                    
+                    # If token is already expired, reject the request
+                    if time_until_expiry <= 0:
+                        raise HTTPException(status_code=401, detail="JWT token has expired. Please refresh your session.")
+                        
+            except jwt.InvalidTokenError:
+                logger.warning(f"Invalid JWT token format for {agent_run_id}")
+            except Exception as e:
+                logger.debug(f"Could not check JWT expiration for {agent_run_id}: {e}")
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Authentication error for stream {agent_run_id}: {e}")
+        raise HTTPException(status_code=401, detail="Authentication failed")
+    
     agent_run_data = await get_agent_run_with_access_check(client, agent_run_id, user_id) # 1 db query
 
     structlog.contextvars.bind_contextvars(
@@ -504,9 +538,17 @@ async def stream_agent_run(
         listener_task = None
         terminate_stream = False
         initial_yield_complete = False
+        
+        # Heartbeat tracking
+        import time
+        last_heartbeat = time.monotonic()
+        heartbeat_interval = 15.0  # Send heartbeat every 15 seconds
 
         try:
-            # 1. Fetch and yield initial responses from Redis list
+            # 1. Send initial connection event
+            yield "event: open\ndata: ok\n\n"
+            
+            # 2. Fetch and yield initial responses from Redis list
             initial_responses_json = await redis.lrange(response_list_key, 0, -1)
             initial_responses = []
             if initial_responses_json:
@@ -624,7 +666,30 @@ async def stream_agent_run(
             # 4. Main loop to process messages from the queue
             while not terminate_stream:
                 try:
-                    queue_item = await message_queue.get()
+                    # Check if client disconnected
+                    if await request.is_disconnected():
+                        logger.debug(f"Client disconnected for {agent_run_id}")
+                        terminate_stream = True
+                        break
+                    
+                    # Check for heartbeat timeout
+                    now = time.monotonic()
+                    if now - last_heartbeat > heartbeat_interval:
+                        try:
+                            yield ":keepalive\n\n"  # SSE comment frame keeps connection alive
+                            last_heartbeat = now
+                            logger.debug(f"Sent heartbeat for {agent_run_id}")
+                        except Exception as heartbeat_error:
+                            logger.debug(f"Failed to send heartbeat for {agent_run_id}: {heartbeat_error}")
+                            terminate_stream = True
+                            break
+
+                    # Try to get a message with a short timeout to allow heartbeat checks
+                    try:
+                        queue_item = await asyncio.wait_for(message_queue.get(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        # No message, continue to check heartbeat
+                        continue
 
                     if queue_item["type"] == "new_response":
                         # Fetch new responses from Redis list starting after the last processed index
@@ -674,6 +739,12 @@ async def stream_agent_run(
                  yield f"data: {json.dumps({'type': 'status', 'status': 'error', 'message': f'Failed to start stream: {e}'})}\n\n"
         finally:
             terminate_stream = True
+            # Send close event
+            try:
+                yield "event: close\ndata: stream-ended\n\n"
+            except Exception:
+                pass  # Client may have disconnected
+            
             # Graceful shutdown order: unsubscribe → close → cancel
             try:
                 if 'pubsub' in locals() and pubsub:
