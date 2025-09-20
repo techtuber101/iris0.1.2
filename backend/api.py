@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, HTTPException, Response, Depends, APIRoute
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from core.services import redis
+from core.services import redis_client
 import sentry
 from contextlib import asynccontextmanager
 from core.agentpress.thread_manager import ThreadManager
@@ -78,9 +78,9 @@ async def lifespan(app: FastAPI):
         logger.info("Sandbox API initialized")
         
         # Initialize Redis connection (optional)
-        from core.services import redis
+        from core.services import redis_client
         try:
-            await redis.initialize_async()
+            await redis_client.initialize_async()
             logger.debug("Redis connection initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Redis connection: {e}")
@@ -130,7 +130,7 @@ async def lifespan(app: FastAPI):
         
         try:
             logger.debug("Closing Redis connection")
-            await redis.close()
+            await redis_client.close()
             logger.debug("Redis connection closed successfully")
         except Exception as e:
             logger.error(f"Error closing Redis connection: {e}")
@@ -332,7 +332,7 @@ async def health_check():
 async def health_check():
     logger.debug("Health docker check endpoint called")
     try:
-        client = await redis.get_client()
+        client = await redis_client.get_client()
         await client.ping()
         db = DBConnection()
         await db.initialize()
@@ -400,7 +400,7 @@ async def debug_worker_status():
     """Debug endpoint to check worker status and Redis connection."""
     import os
     import psutil
-    from core.services import redis
+    from core.services import redis_client
     import dramatiq
     from dramatiq.brokers.redis import RedisBroker
     
@@ -427,14 +427,12 @@ async def debug_worker_status():
     
     # Check Redis connection
     try:
-        await redis.initialize_async()
-        redis_info = await redis.info()
+        await redis_client.initialize_async()
+        client = await redis_client.get_client()
+        await client.ping()
         debug_info["redis_connection"] = {
             "status": "connected",
-            "version": redis_info.get("redis_version"),
-            "uptime": redis_info.get("uptime_in_seconds"),
-            "connected_clients": redis_info.get("connected_clients"),
-            "used_memory": redis_info.get("used_memory_human"),
+            "message": "Redis connection successful"
         }
     except Exception as e:
         debug_info["redis_connection"]["status"] = "error"
@@ -483,7 +481,7 @@ async def debug_test_worker():
     """Test if worker can process a simple task."""
     import dramatiq
     import uuid
-    from core.services import redis
+    from core.services import redis_client
     
     test_key = f"worker_test_{uuid.uuid4().hex}"
     debug_info = {
@@ -501,12 +499,12 @@ async def debug_test_worker():
         @dramatiq.actor
         def test_worker_task(key: str):
             import asyncio
-            from core.services import redis
+            from core.services import redis_client
             
             async def _test():
-                await redis.initialize_async()
-                await redis.set(key, "worker_test_passed", ex=60)
-                await redis.close()
+                await redis_client.initialize_async()
+                await redis_client.set(key, "worker_test_passed", ex=60)
+                await redis_client.close()
             
             asyncio.run(_test())
         
@@ -516,13 +514,13 @@ async def debug_test_worker():
         debug_info["status"] = "task_sent"
         
         # Wait for result
-        await redis.initialize_async()
+        await redis_client.initialize_async()
         for i in range(10):  # Wait up to 10 seconds
-            result = await redis.get(test_key)
+            result = await redis_client.get(test_key)
             if result:
                 debug_info["status"] = "success"
                 debug_info["result"] = result
-                await redis.delete(test_key)
+                await redis_client.delete(test_key)
                 logger.info(f"✅ Test task completed: {test_key}")
                 break
             await asyncio.sleep(1)
@@ -543,7 +541,7 @@ async def debug_test_worker():
 async def debug_queue_status():
     """Debug endpoint to check queue status and Redis connection."""
     import dramatiq
-    from core.services import redis
+    from core.services import redis_client
     
     debug_info = {
         "timestamp": datetime.now().isoformat(),
@@ -555,9 +553,10 @@ async def debug_queue_status():
     
     try:
         # Check Redis connection
-        await redis.initialize_async()
+        await redis_client.initialize_async()
+        client = await redis_client.get_client()
         # Test Redis connection with a simple ping
-        await redis.ping()
+        await client.ping()
         debug_info["redis_status"] = {
             "connected": True,
             "message": "Redis connection successful"
@@ -614,30 +613,43 @@ async def debug_llm():
             test_prompt = "Say 'Hello, this is a test!' and nothing else."
             
             try:
-                # Get model instance
-                model_instance = model_manager.get_model(default_model)
-                if not model_instance:
-                    yield f"data: {json.dumps({'type': 'error', 'error': f'Model {default_model} not found'})}\n\n"
-                    return
+                # Import the LLM service
+                from core.services.llm import make_llm_api_call
                 
-                logger.info(f"✅ Model instance found: {type(model_instance).__name__}")
-                
-                # Test streaming
+                # Test streaming using the proper LLM service
                 logger.info(f"🚀 Starting LLM stream test...")
                 first_token = True
                 token_count = 0
                 
-                async for chunk in model_instance.stream_completion(
+                # Use the proper LLM service for streaming
+                stream = await make_llm_api_call(
                     messages=[{"role": "user", "content": test_prompt}],
+                    model_name=default_model,
                     max_tokens=50,
-                    temperature=0.1
-                ):
+                    temperature=0.1,
+                    stream=True
+                )
+                
+                async for chunk in stream:
                     if first_token:
-                        logger.info(f"🎯 FIRST LLM TOKEN received: {chunk.get('content', '')[:50]}...")
+                        # Extract content from LiteLLM chunk format
+                        content = ""
+                        if hasattr(chunk, 'choices') and chunk.choices:
+                            delta = chunk.choices[0].delta
+                            content = getattr(delta, 'content', '') or ""
+                        logger.info(f"🎯 FIRST LLM TOKEN received: {content[:50]}...")
                         first_token = False
                     
                     token_count += 1
-                    yield f"data: {json.dumps({'type': 'token', 'content': chunk.get('content', ''), 'token_count': token_count})}\n\n"
+                    
+                    # Extract content from chunk
+                    content = ""
+                    if hasattr(chunk, 'choices') and chunk.choices:
+                        delta = chunk.choices[0].delta
+                        content = getattr(delta, 'content', '') or ""
+                    
+                    if content:
+                        yield f"data: {json.dumps({'type': 'token', 'content': content, 'token_count': token_count})}\n\n"
                 
                 logger.info(f"✅ LLM streaming completed successfully with {token_count} tokens")
                 yield f"data: {json.dumps({'type': 'completion', 'token_count': token_count, 'status': 'success'})}\n\n"
