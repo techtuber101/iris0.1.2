@@ -23,6 +23,7 @@ from pydantic import BaseModel
 import uuid
 
 from core import api as core_api
+from core.utils.auth_utils import verify_and_get_user_id_from_jwt
 
 from core.sandbox import api as sandbox_api
 from core.billing_stub import router as billing_stub_router
@@ -145,29 +146,42 @@ app = FastAPI(lifespan=lifespan)
 @app.on_event("startup")
 async def log_routes():
     """Log all registered routes for debugging purposes."""
-    logger.info("=== REGISTERED ROUTES ===")
+    logger.warning("=== REGISTERED ROUTES ===")
     route_count = 0
+    agents_routes = []
+    composio_routes = []
+    
     for route in app.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
             methods = ', '.join(route.methods) if route.methods else 'N/A'
-            logger.info(f"ROUTE {methods} {route.path}")
+            logger.warning(f"ROUTE {methods} {route.path}")
             route_count += 1
+            
+            # Track specific routes we're looking for
+            if '/agents' in route.path:
+                agents_routes.append(route.path)
+            if '/composio' in route.path:
+                composio_routes.append(route.path)
+                
         elif hasattr(route, 'path'):
-            logger.info(f"ROUTE N/A {route.path}")
+            logger.warning(f"ROUTE N/A {route.path}")
             route_count += 1
-    logger.info(f"=== END REGISTERED ROUTES ({route_count} total) ===")
     
-    # Log specific important routes
-    important_routes = ['/agents', '/threads', '/composio/toolkits', '/billing']
-    logger.info("=== CHECKING IMPORTANT ROUTES ===")
-    for important_route in important_routes:
-        found = False
-        for route in app.routes:
-            if hasattr(route, 'path') and route.path.startswith(important_route):
-                found = True
-                break
-        logger.info(f"Route {important_route}: {'FOUND' if found else 'NOT FOUND'}")
-    logger.info("=== END ROUTE CHECK ===")
+    logger.warning(f"=== END REGISTERED ROUTES ({route_count} total) ===")
+    
+    # Log specific findings
+    logger.warning("=== ROUTE ANALYSIS ===")
+    logger.warning(f"Agents routes found: {agents_routes}")
+    logger.warning(f"Composio routes found: {composio_routes}")
+    
+    # Check for exact matches
+    exact_matches = {
+        '/agents': any(r.path == '/agents' for r in app.routes if hasattr(r, 'path')),
+        '/api/agents': any(r.path == '/api/agents' for r in app.routes if hasattr(r, 'path')),
+        '/composio/toolkits': any(r.path.startswith('/composio/toolkits') for r in app.routes if hasattr(r, 'path'))
+    }
+    logger.warning(f"Exact route matches: {exact_matches}")
+    logger.warning("=== END ROUTE ANALYSIS ===")
     
     # Log static files info
     static_dir = os.path.join(os.getcwd(), "static")
@@ -291,7 +305,9 @@ except ImportError:
 
 try:
     from core.composio_integration import api as composio_api
-    api_router.include_router(composio_api.router)
+    # Mount Composio router directly on app (not under /api prefix)
+    app.include_router(composio_api.router)
+    logger.info("Composio API mounted directly on app")
 except ImportError:
     logger.warning("Composio module not available")
 
@@ -364,6 +380,28 @@ async def debug_routes():
             "billing": any(r["path"].startswith("/billing") for r in routes)
         }
     }
+
+# Add a test endpoint to check auth behavior
+@app.get("/debug/test-auth")
+async def test_auth():
+    """Test endpoint to check if auth middleware returns 404 or 401."""
+    return {"message": "This endpoint works without auth", "status": "ok"}
+
+@app.get("/debug/test-auth-protected")
+async def test_auth_protected(user_id: str = Depends(verify_and_get_user_id_from_jwt)):
+    """Test endpoint that requires auth."""
+    return {"message": "This endpoint requires auth", "user_id": user_id, "status": "ok"}
+
+# Add a test agents endpoint to verify routing
+@app.get("/debug/test-agents")
+async def test_agents():
+    """Test endpoint to verify agents routing works."""
+    return {"message": "Agents routing test", "status": "ok", "note": "This should work without /api prefix"}
+
+@app.get("/debug/test-agents-protected")
+async def test_agents_protected(user_id: str = Depends(verify_and_get_user_id_from_jwt)):
+    """Test endpoint that mimics agents endpoint auth behavior."""
+    return {"message": "Agents routing test with auth", "user_id": user_id, "status": "ok"}
 
 # Mount static files for Composio toolkit icons
 static_dir = os.path.join(os.getcwd(), "static")
