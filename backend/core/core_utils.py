@@ -12,7 +12,7 @@ from core.services import redis_client as rc
 from core.services.supabase import DBConnection
 from core.services.llm import make_llm_api_call
 from run_agent_background import _cleanup_redis_response_list
-from core.agent_runs import update_agent_run_status
+# Import moved inside function to avoid circular import
 
 # Global variables (will be set by initialize function)
 db = None
@@ -69,6 +69,7 @@ async def stop_agent_run_with_helpers(agent_run_id: str, error_message: Optional
         # Try fetching from DB as a fallback? Or proceed without responses? Proceeding without for now.
 
     # Update the agent run status in the database
+    from core.agent_runs import update_agent_run_status
     update_success = await update_agent_run_status(
         client, agent_run_id, final_status, error_message=error_message
     )
@@ -391,6 +392,7 @@ async def stop_agent_run(db, agent_run_id: str, error_message: Optional[str] = N
     except Exception as e:
         logger.error(f"Failed to fetch responses from Redis for {agent_run_id} during stop/fail: {e}")
 
+    from core.agent_runs import update_agent_run_status
     update_success = await update_agent_run_status(
         client, agent_run_id, final_status, error=error_message, responses=all_responses
     )
