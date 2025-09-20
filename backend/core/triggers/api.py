@@ -23,6 +23,10 @@ try:
         class StubBillingIntegration:
             async def check_billing_status(self, account_id: str):
                 return {'can_run': True, 'message': 'Billing disabled - unlimited usage'}
+            
+            async def check_and_reserve_credits(self, user_id: str):
+                """Stub method for credit reservation when billing is disabled."""
+                return True, 'Billing disabled - unlimited usage', None
         
         billing_integration = StubBillingIntegration()
 except ImportError:
@@ -30,6 +34,10 @@ except ImportError:
     class StubBillingIntegration:
         async def check_billing_status(self, account_id: str):
             return {'can_run': True, 'message': 'Billing disabled - unlimited usage'}
+        
+        async def check_and_reserve_credits(self, user_id: str):
+            """Stub method for credit reservation when billing is disabled."""
+            return True, 'Billing disabled - unlimited usage', None
     
     billing_integration = StubBillingIntegration()
 
