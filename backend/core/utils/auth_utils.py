@@ -10,7 +10,7 @@ import base64
 import hashlib
 import hmac
 from core.services.supabase import DBConnection
-from core.services import rc as rc
+from core.services import redis_client as rc
 
 async def verify_admin_api_key(x_admin_api_key: Optional[str] = Header(None)):
     if not config.KORTIX_ADMIN_API_KEY:

@@ -3,7 +3,7 @@ dotenv.load_dotenv()
 
 from core.utils.logger import logger
 import run_agent_background
-from core.services import rc as rc
+from core.services import redis_client as rc
 import asyncio
 from core.utils.retry import retry
 import uuid

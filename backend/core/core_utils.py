@@ -8,7 +8,7 @@ from .utils.cache import Cache
 from .utils.logger import logger
 from .utils.config import config
 from .utils.auth_utils import verify_and_authorize_thread_access
-from core.services import rc as rc
+from core.services import redis_client as rc
 from core.services.supabase import DBConnection
 from core.services.llm import make_llm_api_call
 from run_agent_background import update_agent_run_status, _cleanup_redis_response_list

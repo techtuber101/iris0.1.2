@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, HTTPException, Response, Depends, APIRoute
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from core.services import rc as rc
+from core.services import redis_client as rc
 import sentry
 from contextlib import asynccontextmanager
 from core.agentpress.thread_manager import ThreadManager
@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
         logger.info("Sandbox API initialized")
         
         # Initialize Redis connection (optional)
-        from core.services import rc as rc
+        from core.services import redis_client as rc
         try:
             await rc.initialize_async()
             logger.debug("Redis connection initialized successfully")
@@ -400,7 +400,7 @@ async def debug_worker_status():
     """Debug endpoint to check worker status and Redis connection."""
     import os
     import psutil
-    from core.services import rc as rc
+    from core.services import redis_client as rc
     import dramatiq
     from dramatiq.brokers.redis import RedisBroker
     
@@ -481,7 +481,7 @@ async def debug_test_worker():
     """Test if worker can process a simple task."""
     import dramatiq
     import uuid
-    from core.services import rc as rc
+    from core.services import redis_client as rc
     
     test_key = f"worker_test_{uuid.uuid4().hex}"
     debug_info = {
@@ -499,7 +499,7 @@ async def debug_test_worker():
         @dramatiq.actor
         def test_worker_task(key: str):
             import asyncio
-            from core.services import rc as rc
+            from core.services import redis_client as rc
             
             async def _test():
                 await rc.initialize_async()
@@ -541,7 +541,7 @@ async def debug_test_worker():
 async def debug_queue_status():
     """Debug endpoint to check queue status and Redis connection."""
     import dramatiq
-    from core.services import rc as rc
+    from core.services import redis_client as rc
     
     debug_info = {
         "timestamp": datetime.now().isoformat(),
