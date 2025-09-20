@@ -112,7 +112,8 @@ async def run_agent_background(
 
     sentry.sentry.set_tag("thread_id", thread_id)
 
-    logger.debug(f"Starting background agent run: {agent_run_id} for thread: {thread_id} (Instance: {instance_id})")
+    logger.info(f"🚀 PROCESSING AGENT RUN: {agent_run_id} for thread: {thread_id} (Instance: {instance_id})")
+    logger.info(f"📊 Processing parameters: model={model_name}, thinking={enable_thinking}, reasoning={reasoning_effort}, stream={stream}")
     logger.debug({
         "model_name": model_name,
         "enable_thinking": enable_thinking,
@@ -139,6 +140,8 @@ async def run_agent_background(
     logger.debug(f"🚀 Using model: {effective_model} (thinking: {enable_thinking}, reasoning_effort: {reasoning_effort})")
     if agent_config:
         logger.debug(f"Using custom agent: {agent_config.get('name', 'Unknown')}")
+    
+    logger.info(f"✅ WORKER READY TO PROCESS: {agent_run_id}")
 
     client = await db.client
     start_time = datetime.now(timezone.utc)

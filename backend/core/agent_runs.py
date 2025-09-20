@@ -549,27 +549,38 @@ async def stream_agent_run(
         heartbeat_interval = 15.0  # Send heartbeat every 15 seconds
 
         try:
-            # 1. Send initial connection event
+            # 1. Send immediate connection events (critical for client feedback)
+            logger.info(f"📡 Sending immediate connection events for {agent_run_id}")
             yield "event: open\ndata: ok\n\n"
+            yield f"data: {json.dumps({'type': 'status', 'status': 'connecting', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
             
             # 2. Fetch and yield initial responses from Redis list
+            logger.info(f"🔍 Fetching initial responses for {agent_run_id}")
             initial_responses_json = await redis.lrange(response_list_key, 0, -1)
             initial_responses = []
             if initial_responses_json:
                 initial_responses = [json.loads(r) for r in initial_responses_json]
-                logger.debug(f"Sending {len(initial_responses)} initial responses for {agent_run_id}")
+                logger.info(f"📤 Sending {len(initial_responses)} initial responses for {agent_run_id}")
                 for response in initial_responses:
                     yield f"data: {json.dumps(response)}\n\n"
                 last_processed_index = len(initial_responses) - 1
+            else:
+                logger.info(f"📭 No initial responses found for {agent_run_id}")
             initial_yield_complete = True
 
-            # 2. Check run status
+            # 3. Check run status and emit appropriate status
             current_status = agent_run_data.get('status') if agent_run_data else None
+            logger.info(f"📊 Agent run {agent_run_id} current status: {current_status}")
 
             if current_status != 'running':
-                logger.debug(f"Agent run {agent_run_id} is not running (status: {current_status}). Ending stream.")
-                yield f"data: {json.dumps({'type': 'status', 'status': 'completed'})}\n\n"
+                logger.info(f"🏁 Agent run {agent_run_id} is not running (status: {current_status}). Ending stream.")
+                yield f"data: {json.dumps({'type': 'status', 'status': 'completed', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+                yield "event: close\ndata: stream-ended\n\n"
                 return
+            
+            # 4. Emit processing status
+            logger.info(f"🔄 Agent run {agent_run_id} is running, starting stream processing")
+            yield f"data: {json.dumps({'type': 'status', 'status': 'processing', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
           
             structlog.contextvars.bind_contextvars(
                 thread_id=agent_run_data.get('thread_id'),
@@ -703,12 +714,19 @@ async def stream_agent_run(
                         if new_responses_json:
                             new_responses = [json.loads(r) for r in new_responses_json]
                             num_new = len(new_responses)
-                            # logger.debug(f"Received {num_new} new responses for {agent_run_id} (index {new_start_index} onwards)")
-                            for response in new_responses:
+                            message_count += num_new
+                            logger.info(f"📨 Processing {num_new} new responses for {agent_run_id} (total: {message_count})")
+                            
+                            for i, response in enumerate(new_responses):
+                                # Log first token
+                                if message_count == 1 and response.get('type') == 'token':
+                                    logger.info(f"🎯 FIRST TOKEN for {agent_run_id}: {response.get('content', '')[:50]}...")
+                                
                                 yield f"data: {json.dumps(response)}\n\n"
+                                
                                 # Check if this response signals completion
                                 if response.get('type') == 'status' and response.get('status') in ['completed', 'failed', 'stopped']:
-                                    logger.debug(f"Detected run completion via status message in stream: {response.get('status')}")
+                                    logger.info(f"🏁 Detected run completion via status message: {response.get('status')}")
                                     terminate_stream = True
                                     break # Stop processing further new responses
                             last_processed_index += num_new

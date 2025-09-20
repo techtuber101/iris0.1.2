@@ -533,71 +533,72 @@ async def debug_test_worker():
     
     return debug_info
 
-@app.get("/debug/agent-run-status/{agent_run_id}")
-async def debug_agent_run_status(agent_run_id: str):
-    """Debug specific agent run status."""
-    from core.services.supabase import DBConnection
-    from core.services import redis
+@app.get("/debug/llm")
+async def debug_llm():
+    """Debug endpoint to test LLM streaming directly."""
+    import os
+    from core.ai_models import model_manager
     
-    debug_info = {
-        "agent_run_id": agent_run_id,
-        "timestamp": datetime.now().isoformat(),
-        "database_status": {},
-        "redis_status": {},
-        "stream_status": {},
-        "errors": []
-    }
+    async def gen():
+        try:
+            yield "event: open\ndata: ok\n\n"
+            yield f"data: {json.dumps({'type': 'status', 'status': 'testing_llm', 'timestamp': datetime.now().isoformat()})}\n\n"
+            
+            # Get default model
+            default_model = os.getenv("DEFAULT_MODEL", "gemini/gemini-2.5-flash")
+            logger.info(f"🧪 Testing LLM streaming with model: {default_model}")
+            
+            # Test with a simple prompt
+            test_prompt = "Say 'Hello, this is a test!' and nothing else."
+            
+            try:
+                # Get model instance
+                model_instance = model_manager.get_model(default_model)
+                if not model_instance:
+                    yield f"data: {json.dumps({'type': 'error', 'error': f'Model {default_model} not found'})}\n\n"
+                    return
+                
+                logger.info(f"✅ Model instance found: {type(model_instance).__name__}")
+                
+                # Test streaming
+                logger.info(f"🚀 Starting LLM stream test...")
+                first_token = True
+                token_count = 0
+                
+                async for chunk in model_instance.stream_completion(
+                    messages=[{"role": "user", "content": test_prompt}],
+                    max_tokens=50,
+                    temperature=0.1
+                ):
+                    if first_token:
+                        logger.info(f"🎯 FIRST LLM TOKEN received: {chunk.get('content', '')[:50]}...")
+                        first_token = False
+                    
+                    token_count += 1
+                    yield f"data: {json.dumps({'type': 'token', 'content': chunk.get('content', ''), 'token_count': token_count})}\n\n"
+                
+                logger.info(f"✅ LLM streaming completed successfully with {token_count} tokens")
+                yield f"data: {json.dumps({'type': 'completion', 'token_count': token_count, 'status': 'success'})}\n\n"
+                
+            except Exception as e:
+                logger.error(f"❌ LLM streaming failed: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'error': f'LLM streaming failed: {str(e)}'})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"❌ Debug LLM endpoint failed: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'error': f'Debug endpoint failed: {str(e)}'})}\n\n"
+        finally:
+            yield "event: done\ndata: {}\n\n"
     
-    try:
-        # Check database
-        db = DBConnection()
-        await db.initialize()
-        
-        result = await db.execute(
-            "SELECT * FROM agent_runs WHERE id = $1",
-            agent_run_id
-        )
-        
-        if result:
-            debug_info["database_status"] = {
-                "found": True,
-                "status": result[0].get("status"),
-                "created_at": result[0].get("created_at"),
-                "updated_at": result[0].get("updated_at"),
-                "error_message": result[0].get("error_message"),
-            }
-        else:
-            debug_info["database_status"]["found"] = False
-            debug_info["errors"].append("Agent run not found in database")
-    
-    except Exception as e:
-        debug_info["database_status"]["error"] = str(e)
-        debug_info["errors"].append(f"Database check failed: {e}")
-    
-    try:
-        # Check Redis channels
-        await redis.initialize_async()
-        
-        response_channel = f"agent_run:{agent_run_id}:response"
-        control_channel = f"agent_run:{agent_run_id}:control"
-        
-        # Check if channels exist
-        pubsub = await redis.create_pubsub()
-        await pubsub.subscribe(response_channel, control_channel)
-        
-        debug_info["redis_status"] = {
-            "response_channel": response_channel,
-            "control_channel": control_channel,
-            "channels_subscribed": True,
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
         }
-        
-        await pubsub.close()
-        
-    except Exception as e:
-        debug_info["redis_status"]["error"] = str(e)
-        debug_info["errors"].append(f"Redis check failed: {e}")
-    
-    return debug_info
+    )
 
 @app.get("/debug/test-agents-protected")
 async def test_agents_protected(user_id: str = Depends(verify_and_get_user_id_from_jwt)):
