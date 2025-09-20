@@ -392,11 +392,212 @@ async def test_auth_protected(user_id: str = Depends(verify_and_get_user_id_from
     """Test endpoint that requires auth."""
     return {"message": "This endpoint requires auth", "user_id": user_id, "status": "ok"}
 
-# Add a test agents endpoint to verify routing
-@app.get("/debug/test-agents")
-async def test_agents():
-    """Test endpoint to verify agents routing works."""
-    return {"message": "Agents routing test", "status": "ok", "note": "This should work without /api prefix"}
+# Add comprehensive worker debugging endpoints
+@app.get("/debug/worker-status")
+async def debug_worker_status():
+    """Debug endpoint to check worker status and Redis connection."""
+    import os
+    import psutil
+    from core.services import redis
+    import dramatiq
+    from dramatiq.brokers.redis import RedisBroker
+    
+    debug_info = {
+        "timestamp": datetime.now().isoformat(),
+        "system": {
+            "python_version": sys.version,
+            "working_directory": os.getcwd(),
+            "cpu_count": psutil.cpu_count(),
+            "memory_usage": psutil.virtual_memory().percent,
+        },
+        "environment": {
+            "PORT": os.getenv("PORT"),
+            "REDIS_URL": "***" if os.getenv("REDIS_URL") else None,
+            "REDIS_HOST": os.getenv("REDIS_HOST"),
+            "REDIS_PORT": os.getenv("REDIS_PORT"),
+            "REDIS_PASSWORD": "***" if os.getenv("REDIS_PASSWORD") else None,
+        },
+        "redis_connection": {},
+        "dramatiq_broker": {},
+        "worker_processes": [],
+        "errors": []
+    }
+    
+    # Check Redis connection
+    try:
+        await redis.initialize_async()
+        redis_info = await redis.info()
+        debug_info["redis_connection"] = {
+            "status": "connected",
+            "version": redis_info.get("redis_version"),
+            "uptime": redis_info.get("uptime_in_seconds"),
+            "connected_clients": redis_info.get("connected_clients"),
+            "used_memory": redis_info.get("used_memory_human"),
+        }
+    except Exception as e:
+        debug_info["redis_connection"]["status"] = "error"
+        debug_info["redis_connection"]["error"] = str(e)
+        debug_info["errors"].append(f"Redis connection failed: {e}")
+    
+    # Check Dramatiq broker
+    try:
+        broker = dramatiq.get_broker()
+        debug_info["dramatiq_broker"] = {
+            "type": type(broker).__name__,
+            "is_connected": hasattr(broker, 'client') and broker.client is not None,
+        }
+        
+        # Try to get queue info
+        if hasattr(broker, 'get_declared_queues'):
+            queues = broker.get_declared_queues()
+            debug_info["dramatiq_broker"]["queues"] = list(queues)
+    except Exception as e:
+        debug_info["dramatiq_broker"]["error"] = str(e)
+        debug_info["errors"].append(f"Dramatiq broker error: {e}")
+    
+    # Check for worker processes
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                cmdline = ' '.join(proc.info['cmdline'] or [])
+                if 'dramatiq' in cmdline or 'run_agent_background' in cmdline:
+                    debug_info["worker_processes"].append({
+                        "pid": proc.info['pid'],
+                        "name": proc.info['name'],
+                        "cmdline": cmdline,
+                        "status": proc.status(),
+                        "cpu_percent": proc.cpu_percent(),
+                        "memory_percent": proc.memory_percent(),
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception as e:
+        debug_info["errors"].append(f"Process check failed: {e}")
+    
+    return debug_info
+
+@app.get("/debug/test-worker")
+async def debug_test_worker():
+    """Test if worker can process a simple task."""
+    import dramatiq
+    import uuid
+    from core.services import redis
+    
+    test_key = f"worker_test_{uuid.uuid4().hex}"
+    debug_info = {
+        "timestamp": datetime.now().isoformat(),
+        "test_key": test_key,
+        "status": "unknown",
+        "errors": []
+    }
+    
+    try:
+        # Send a test task
+        broker = dramatiq.get_broker()
+        
+        # Create a simple test task
+        @dramatiq.actor
+        def test_worker_task(key: str):
+            import asyncio
+            from core.services import redis
+            
+            async def _test():
+                await redis.initialize_async()
+                await redis.set(key, "worker_test_passed", ex=60)
+                await redis.close()
+            
+            asyncio.run(_test())
+        
+        # Send the task
+        test_worker_task.send(test_key)
+        debug_info["status"] = "task_sent"
+        
+        # Wait for result
+        await redis.initialize_async()
+        for i in range(10):  # Wait up to 10 seconds
+            result = await redis.get(test_key)
+            if result:
+                debug_info["status"] = "success"
+                debug_info["result"] = result
+                await redis.delete(test_key)
+                break
+            await asyncio.sleep(1)
+        
+        if debug_info["status"] == "task_sent":
+            debug_info["status"] = "timeout"
+            debug_info["errors"].append("Worker did not process task within 10 seconds")
+        
+    except Exception as e:
+        debug_info["status"] = "error"
+        debug_info["errors"].append(str(e))
+    
+    return debug_info
+
+@app.get("/debug/agent-run-status/{agent_run_id}")
+async def debug_agent_run_status(agent_run_id: str):
+    """Debug specific agent run status."""
+    from core.services.supabase import DBConnection
+    from core.services import redis
+    
+    debug_info = {
+        "agent_run_id": agent_run_id,
+        "timestamp": datetime.now().isoformat(),
+        "database_status": {},
+        "redis_status": {},
+        "stream_status": {},
+        "errors": []
+    }
+    
+    try:
+        # Check database
+        db = DBConnection()
+        await db.initialize()
+        
+        result = await db.execute(
+            "SELECT * FROM agent_runs WHERE id = $1",
+            agent_run_id
+        )
+        
+        if result:
+            debug_info["database_status"] = {
+                "found": True,
+                "status": result[0].get("status"),
+                "created_at": result[0].get("created_at"),
+                "updated_at": result[0].get("updated_at"),
+                "error_message": result[0].get("error_message"),
+            }
+        else:
+            debug_info["database_status"]["found"] = False
+            debug_info["errors"].append("Agent run not found in database")
+    
+    except Exception as e:
+        debug_info["database_status"]["error"] = str(e)
+        debug_info["errors"].append(f"Database check failed: {e}")
+    
+    try:
+        # Check Redis channels
+        await redis.initialize_async()
+        
+        response_channel = f"agent_run:{agent_run_id}:response"
+        control_channel = f"agent_run:{agent_run_id}:control"
+        
+        # Check if channels exist
+        pubsub = await redis.create_pubsub()
+        await pubsub.subscribe(response_channel, control_channel)
+        
+        debug_info["redis_status"] = {
+            "response_channel": response_channel,
+            "control_channel": control_channel,
+            "channels_subscribed": True,
+        }
+        
+        await pubsub.close()
+        
+    except Exception as e:
+        debug_info["redis_status"]["error"] = str(e)
+        debug_info["errors"].append(f"Redis check failed: {e}")
+    
+    return debug_info
 
 @app.get("/debug/test-agents-protected")
 async def test_agents_protected(user_id: str = Depends(verify_and_get_user_id_from_jwt)):

@@ -482,12 +482,14 @@ async def stream_agent_run(
     request: Request = None
 ):
     """Stream the responses of an agent run using Redis Lists and Pub/Sub."""
-    logger.debug(f"Starting stream for agent run: {agent_run_id}")
+    logger.info(f"🎯 Starting stream for agent run: {agent_run_id}")
+    logger.info(f"📊 Stream request details: method={request.method if request else 'N/A'}, url={request.url if request else 'N/A'}")
     client = await utils.db.client
 
     # Check JWT expiration before starting long-lived stream
     try:
         user_id = await get_user_id_from_stream_auth(request, token)
+        logger.info(f"✅ Authentication successful for user {user_id}")
         
         # Additional check: if token is close to expiry, warn the client
         if token:
@@ -521,6 +523,7 @@ async def stream_agent_run(
         raise HTTPException(status_code=401, detail="Authentication failed")
     
     agent_run_data = await get_agent_run_with_access_check(client, agent_run_id, user_id) # 1 db query
+    logger.info(f"📋 Agent run data retrieved: status={agent_run_data.get('status') if agent_run_data else 'None'}, thread_id={agent_run_data.get('thread_id') if agent_run_data else 'None'}")
 
     structlog.contextvars.bind_contextvars(
         agent_run_id=agent_run_id,
@@ -532,12 +535,13 @@ async def stream_agent_run(
     control_channel = f"agent_run:{agent_run_id}:control" # Global control channel
 
     async def stream_generator(agent_run_data):
-        logger.debug(f"Streaming responses for {agent_run_id} using Redis list {response_list_key} and channel {response_channel}")
+        logger.info(f"🔄 Starting stream generator for {agent_run_id} using Redis list {response_list_key} and channel {response_channel}")
         last_processed_index = -1
         # Single pubsub used for response + control
         listener_task = None
         terminate_stream = False
         initial_yield_complete = False
+        message_count = 0
         
         # Heartbeat tracking
         import time

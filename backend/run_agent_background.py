@@ -73,6 +73,9 @@ async def run_agent_background(
     request_id: Optional[str] = None
 ):
     """Run the agent in the background using Redis for state."""
+    logger.info(f"🤖 Starting background agent run: {agent_run_id} for thread: {thread_id} (Instance: {instance_id})")
+    logger.info(f"📊 Agent run parameters: model={model_name}, thinking={enable_thinking}, reasoning={reasoning_effort}, stream={stream}")
+    
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(
         agent_run_id=agent_run_id,
@@ -81,9 +84,11 @@ async def run_agent_background(
     )
 
     try:
+        logger.info(f"🔧 Initializing services for {agent_run_id}")
         await initialize()
+        logger.info(f"✅ Services initialized for {agent_run_id}")
     except Exception as e:
-        logger.critical(f"Failed to initialize Redis connection: {e}")
+        logger.critical(f"❌ Failed to initialize Redis connection for {agent_run_id}: {e}")
         raise e
 
     # Idempotency check: prevent duplicate runs
