@@ -561,6 +561,17 @@ async def get_toolkit_icon(
     current_user_id: Optional[str] = Depends(get_optional_current_user_id_from_jwt)
 ):
     try:
+        import os
+        from fastapi.responses import FileResponse
+        
+        # Check if we have a local SVG file for this toolkit
+        static_dir = os.path.join(os.getcwd(), "static", "toolkits")
+        svg_file = os.path.join(static_dir, f"{toolkit_slug}.svg")
+        
+        if os.path.exists(svg_file):
+            return FileResponse(svg_file, media_type="image/svg+xml")
+        
+        # Fallback to toolkit service for remote icons
         toolkit_service = ToolkitService()
         icon_url = await toolkit_service.get_toolkit_icon(toolkit_slug)
         
@@ -571,13 +582,10 @@ async def get_toolkit_icon(
                 "icon_url": icon_url
             }
         else:
-            return {
-                "success": False,
-                "toolkit_slug": toolkit_slug,
-                "icon_url": None,
-                "message": "Icon not found"
-            }
+            raise HTTPException(status_code=404, detail="Icon not found")
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting toolkit icon: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

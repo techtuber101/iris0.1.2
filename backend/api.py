@@ -146,13 +146,28 @@ app = FastAPI(lifespan=lifespan)
 async def log_routes():
     """Log all registered routes for debugging purposes."""
     logger.info("=== REGISTERED ROUTES ===")
+    route_count = 0
     for route in app.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
             methods = ', '.join(route.methods) if route.methods else 'N/A'
             logger.info(f"ROUTE {methods} {route.path}")
+            route_count += 1
         elif hasattr(route, 'path'):
             logger.info(f"ROUTE N/A {route.path}")
-    logger.info("=== END REGISTERED ROUTES ===")
+            route_count += 1
+    logger.info(f"=== END REGISTERED ROUTES ({route_count} total) ===")
+    
+    # Log specific important routes
+    important_routes = ['/agents', '/threads', '/composio/toolkits', '/billing']
+    logger.info("=== CHECKING IMPORTANT ROUTES ===")
+    for important_route in important_routes:
+        found = False
+        for route in app.routes:
+            if hasattr(route, 'path') and route.path.startswith(important_route):
+                found = True
+                break
+        logger.info(f"Route {important_route}: {'FOUND' if found else 'NOT FOUND'}")
+    logger.info("=== END ROUTE CHECK ===")
     
     # Log static files info
     static_dir = os.path.join(os.getcwd(), "static")
@@ -204,6 +219,8 @@ allowed_origins = [
     "https://irisvision.ai",
     "https://www.irisvision.ai", 
     "https://staging.irisvision.ai",
+    "https://irisproduction.vercel.app",
+    "https://irisproduction-git-main-hahaicarus-projects.vercel.app",
     "http://localhost:3000"
 ]
 allow_origin_regex = None
@@ -324,11 +341,42 @@ async def root():
 async def health():
     return {"status": "ok", "message": "Iris API is healthy"}
 
+# Add a debug endpoint to test routing
+@app.get("/debug/routes")
+async def debug_routes():
+    """Debug endpoint to list all available routes."""
+    routes = []
+    for route in app.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            methods = list(route.methods) if route.methods else ['N/A']
+            routes.append({
+                "path": route.path,
+                "methods": methods,
+                "name": getattr(route, 'name', 'unnamed')
+            })
+    return {
+        "total_routes": len(routes),
+        "routes": routes,
+        "important_routes": {
+            "agents": any(r["path"].startswith("/agents") for r in routes),
+            "threads": any(r["path"].startswith("/threads") for r in routes),
+            "composio_toolkits": any(r["path"].startswith("/composio/toolkits") for r in routes),
+            "billing": any(r["path"].startswith("/billing") for r in routes)
+        }
+    }
+
 # Mount static files for Composio toolkit icons
 static_dir = os.path.join(os.getcwd(), "static")
 if os.path.exists(static_dir):
-    app.mount("/composio/toolkits", StaticFiles(directory=os.path.join(static_dir, "toolkits")), name="toolkits")
-    logger.info(f"Mounted static files from {static_dir}/toolkits")
+    toolkits_dir = os.path.join(static_dir, "toolkits")
+    if os.path.exists(toolkits_dir):
+        app.mount("/composio/toolkits", StaticFiles(directory=toolkits_dir), name="toolkits")
+        logger.info(f"Mounted static files from {toolkits_dir}")
+        # List available files
+        files = os.listdir(toolkits_dir)
+        logger.info(f"Available toolkit icons: {files}")
+    else:
+        logger.warning(f"Toolkits directory not found: {toolkits_dir}")
 else:
     logger.warning(f"Static directory not found: {static_dir}")
 
@@ -356,12 +404,13 @@ if __name__ == "__main__":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     
     workers = 4
+    port = int(os.getenv("PORT", 8000))
     
-    logger.debug(f"Starting server on 0.0.0.0:8000 with {workers} workers")
+    logger.debug(f"Starting server on 0.0.0.0:{port} with {workers} workers")
     uvicorn.run(
         "api:app", 
         host="0.0.0.0", 
-        port=8000,
+        port=port,
         workers=workers,
         loop="asyncio"
     )
