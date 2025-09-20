@@ -492,25 +492,12 @@ async def debug_test_worker():
     }
     
     try:
-        # Send a test task
-        broker = dramatiq.get_broker()
-        
-        # Create a simple test task
-        @dramatiq.actor
-        def api_test_worker_task(key: str):
-            import asyncio
-            from core.services import redis_client as rc
-            
-            async def _test():
-                await rc.initialize_async()
-                await rc.set(key, "worker_test_passed", ex=60)
-                await rc.close()
-            
-            asyncio.run(_test())
-        
-        # Send the task
+        # Send a test task using the worker's test_worker_task actor
         logger.info(f"🧪 Sending test task: {test_key}")
-        api_test_worker_task.send(test_key)
+        
+        # Import the actor from the worker module
+        from run_agent_background import test_worker_task
+        test_worker_task.send(test_key)
         debug_info["status"] = "task_sent"
         
         # Wait for result

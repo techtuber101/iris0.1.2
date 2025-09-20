@@ -153,17 +153,14 @@ async def run_agent_background(
             pending_redis_operations = []
             
             async for response in run_agent(
-                agent_run_id=agent_run_id,
                 thread_id=thread_id,
-                instance_id=instance_id,
                 project_id=project_id,
+                stream=stream,
                 model_name=model_name,
                 enable_thinking=enable_thinking,
                 reasoning_effort=reasoning_effort,
-                stream=stream,
                 enable_context_manager=enable_context_manager,
                 agent_config=agent_config,
-                request_id=request_id,
             ):
                 responses.append(response)
                 response_json = json.dumps(response)
