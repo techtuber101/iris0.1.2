@@ -497,7 +497,7 @@ async def debug_test_worker():
         
         # Create a simple test task
         @dramatiq.actor
-        def test_worker_task(key: str):
+        def api_test_worker_task(key: str):
             import asyncio
             from core.services import redis_client as rc
             
@@ -510,7 +510,7 @@ async def debug_test_worker():
         
         # Send the task
         logger.info(f"🧪 Sending test task: {test_key}")
-        test_worker_task.send(test_key)
+        api_test_worker_task.send(test_key)
         debug_info["status"] = "task_sent"
         
         # Wait for result
