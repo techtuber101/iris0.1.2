@@ -37,7 +37,7 @@ def initialize():
     logger.debug(f"Initializing Redis connection pool to {redis_host}:{redis_port} with max {max_connections} connections")
 
     # Create connection pool with production-optimized settings
-    pool = redis_client.ConnectionPool(
+    pool = redis.ConnectionPool(
         host=redis_host,
         port=redis_port,
         password=redis_password,
@@ -51,7 +51,7 @@ def initialize():
     )
 
     # Create Redis client from connection pool
-    client = redis_client.Redis(connection_pool=pool)
+    client = redis.Redis(connection_pool=pool)
 
     return client
 
@@ -124,56 +124,56 @@ async def get_client():
 # Basic Redis operations
 async def set(key: str, value: str, ex: int = None, nx: bool = False):
     """Set a Redis key."""
-    redis_client = await get_client()
-    return await redis_client.set(key, value, ex=ex, nx=nx)
+    redis = await get_client()
+    return await redis.set(key, value, ex=ex, nx=nx)
 
 
 async def get(key: str, default: str = None):
     """Get a Redis key."""
-    redis_client = await get_client()
-    result = await redis_client.get(key)
+    redis = await get_client()
+    result = await redis.get(key)
     return result if result is not None else default
 
 
 async def delete(key: str):
     """Delete a Redis key."""
-    redis_client = await get_client()
-    return await redis_client.delete(key)
+    redis = await get_client()
+    return await redis.delete(key)
 
 
 async def publish(channel: str, message: str):
     """Publish a message to a Redis channel."""
-    redis_client = await get_client()
-    return await redis_client.publish(channel, message)
+    redis = await get_client()
+    return await redis.publish(channel, message)
 
 
 async def create_pubsub():
     """Create a Redis pubsub object."""
-    redis_client = await get_client()
-    return redis_client.pubsub()
+    redis = await get_client()
+    return redis.pubsub()
 
 
 # List operations
 async def rpush(key: str, *values: Any):
     """Append one or more values to a list."""
-    redis_client = await get_client()
-    return await redis_client.rpush(key, *values)
+    redis = await get_client()
+    return await redis.rpush(key, *values)
 
 
 async def lrange(key: str, start: int, end: int) -> List[str]:
     """Get a range of elements from a list."""
-    redis_client = await get_client()
-    return await redis_client.lrange(key, start, end)
+    redis = await get_client()
+    return await redis.lrange(key, start, end)
 
 
 # Key management
 
 
 async def keys(pattern: str) -> List[str]:
-    redis_client = await get_client()
-    return await redis_client.keys(pattern)
+    redis = await get_client()
+    return await redis.keys(pattern)
 
 
 async def expire(key: str, seconds: int):
-    redis_client = await get_client()
-    return await redis_client.expire(key, seconds)
+    redis = await get_client()
+    return await redis.expire(key, seconds)
