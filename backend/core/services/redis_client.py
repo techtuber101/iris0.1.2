@@ -7,8 +7,8 @@ from typing import List, Any
 from core.utils.retry import retry
 
 # Redis client and connection pool
-client: redis_client.Redis | None = None
-pool: redis_client.ConnectionPool | None = None
+client: redis.Redis | None = None
+pool: redis.ConnectionPool | None = None
 _initialized = False
 _init_lock = asyncio.Lock()
 
