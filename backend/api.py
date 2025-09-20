@@ -554,13 +554,11 @@ async def debug_queue_status():
     try:
         # Check Redis connection
         await redis.initialize_async()
-        redis_info = await redis.info()
+        # Test Redis connection with a simple ping
+        await redis.ping()
         debug_info["redis_status"] = {
             "connected": True,
-            "version": redis_info.get("redis_version"),
-            "uptime": redis_info.get("uptime_in_seconds"),
-            "connected_clients": redis_info.get("connected_clients"),
-            "used_memory": redis_info.get("used_memory_human"),
+            "message": "Redis connection successful"
         }
         
         # Check Dramatiq broker
