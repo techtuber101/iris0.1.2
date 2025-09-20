@@ -30,6 +30,7 @@ import { PlaybookExecuteDialog } from '@/components/playbooks/playbook-execute-d
 import { AgentAvatar } from '@/components/thread/content/agent-avatar';
 import { AgentModelSelector } from '@/components/agents/config/model-selector';
 import { useRouter } from 'next/navigation';
+import { useSidebar } from '@/components/ui/sidebar';
 
 type UnifiedConfigMenuProps = {
     isLoggedIn?: boolean;
@@ -137,7 +138,13 @@ const LoggedInMenu: React.FC<UnifiedConfigMenuProps> = ({
 
 
 
+    const { state: sidebarState } = useSidebar();
+    
     const renderAgentIcon = (agent: any) => {
+        // Hide agent icon when sidebar is collapsed
+        if (sidebarState === 'collapsed') {
+            return null;
+        }
         return <AgentAvatar agentId={agent?.agent_id} size={20} className="flex-shrink-0" fallbackName={agent?.name} />;
     };
 
