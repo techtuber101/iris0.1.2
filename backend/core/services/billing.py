@@ -846,7 +846,9 @@ async def get_allowed_models_for_user(client, user_id: str):
                 tier_name = tier_info['name']
     
     if tier_name in ['none', 'free']:
-        result = []
+        # Return free tier models for free users
+        result = model_manager.get_models_for_tier('free')  
+        result = [model.id for model in result]  # Convert to list of IDs
     else:
         result = model_manager.get_models_for_tier('paid')  
         result = [model.id for model in result]  # Convert to list of IDs
