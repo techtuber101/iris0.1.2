@@ -41,14 +41,37 @@ def setup_redis_broker():
         redis_host = parsed.hostname or 'localhost'
         redis_port = parsed.port or 6379
         redis_password = parsed.password or ''
-        redis_broker = RedisBroker(host=redis_host, port=redis_port, password=redis_password, middleware=[dramatiq.middleware.AsyncIO()])
+        # Use same connection settings as our redis_client
+        redis_broker = RedisBroker(
+            host=redis_host, 
+            port=redis_port, 
+            password=redis_password,
+            socket_timeout=5,
+            socket_connect_timeout=5,
+            socket_keepalive=True,
+            retry_on_timeout=True,
+            health_check_interval=30,
+            middleware=[dramatiq.middleware.AsyncIO()]
+        )
     else:
         redis_host = os.getenv('REDIS_HOST', 'redis')
         redis_port = int(os.getenv('REDIS_PORT', 6379))
         redis_password = os.getenv('REDIS_PASSWORD', '')  # Empty string for no password
-        redis_broker = RedisBroker(host=redis_host, port=redis_port, password=redis_password, middleware=[dramatiq.middleware.AsyncIO()])
+        # Use same connection settings as our redis_client
+        redis_broker = RedisBroker(
+            host=redis_host, 
+            port=redis_port, 
+            password=redis_password,
+            socket_timeout=5,
+            socket_connect_timeout=5,
+            socket_keepalive=True,
+            retry_on_timeout=True,
+            health_check_interval=30,
+            middleware=[dramatiq.middleware.AsyncIO()]
+        )
     
     dramatiq.set_broker(redis_broker)
+    logger.debug(f"Redis broker configured: {redis_host}:{redis_port}")
     return redis_broker
 
 
