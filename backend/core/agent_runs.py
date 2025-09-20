@@ -540,37 +540,82 @@ async def stream_agent_run(
             async def listen_messages():
                 listener = pubsub.listen()
                 task = asyncio.create_task(listener.__anext__())
+                reconnect_attempts = 0
+                max_reconnect_attempts = 3
 
                 while not terminate_stream:
-                    done, _ = await asyncio.wait([task], return_when=asyncio.FIRST_COMPLETED)
-                    for finished in done:
-                        try:
-                            message = finished.result()
-                            if message and isinstance(message, dict) and message.get("type") == "message":
-                                channel = message.get("channel")
-                                data = message.get("data")
-                                if isinstance(data, bytes):
-                                    data = data.decode('utf-8')
-
-                                if channel == response_channel and data == "new":
-                                    await message_queue.put({"type": "new_response"})
-                                elif channel == control_channel and data in ["STOP", "END_STREAM", "ERROR"]:
-                                    logger.debug(f"Received control signal '{data}' for {agent_run_id}")
-                                    await message_queue.put({"type": "control", "data": data})
-                                    return  # Stop listening on control signal
-
-                        except StopAsyncIteration:
-                            logger.warning(f"Listener stopped for {agent_run_id}.")
-                            await message_queue.put({"type": "error", "data": "Listener stopped unexpectedly"})
-                            return
-                        except Exception as e:
-                            logger.error(f"Error in listener for {agent_run_id}: {e}")
-                            await message_queue.put({"type": "error", "data": "Listener failed"})
-                            return
-                        finally:
-                            # Resubscribe to the next message if continuing
-                            if not terminate_stream:
+                    try:
+                        done, _ = await asyncio.wait([task], return_when=asyncio.FIRST_COMPLETED, timeout=30.0)
+                        if not done:
+                            # Timeout - check if we should reconnect
+                            logger.debug(f"Pub/Sub timeout for {agent_run_id}, checking connection health")
+                            try:
+                                await asyncio.wait_for(pubsub.ping(), timeout=5.0)
+                                logger.debug(f"Pub/Sub connection healthy for {agent_run_id}")
                                 task = asyncio.create_task(listener.__anext__())
+                                continue
+                            except Exception as ping_error:
+                                logger.warning(f"Pub/Sub connection unhealthy for {agent_run_id}: {ping_error}")
+                                if reconnect_attempts < max_reconnect_attempts:
+                                    reconnect_attempts += 1
+                                    logger.info(f"Attempting to reconnect Pub/Sub for {agent_run_id} (attempt {reconnect_attempts})")
+                                    try:
+                                        await pubsub.unsubscribe(response_channel, control_channel)
+                                        await pubsub.close()
+                                        # Create new pubsub connection
+                                        new_pubsub = await redis.create_pubsub()
+                                        await new_pubsub.subscribe(response_channel, control_channel)
+                                        pubsub = new_pubsub
+                                        listener = pubsub.listen()
+                                        task = asyncio.create_task(listener.__anext__())
+                                        logger.info(f"Successfully reconnected Pub/Sub for {agent_run_id}")
+                                        continue
+                                    except Exception as reconnect_error:
+                                        logger.error(f"Failed to reconnect Pub/Sub for {agent_run_id}: {reconnect_error}")
+                                        await message_queue.put({"type": "error", "data": "Connection lost and reconnection failed"})
+                                        return
+                                else:
+                                    logger.error(f"Max reconnection attempts reached for {agent_run_id}")
+                                    await message_queue.put({"type": "error", "data": "Connection lost"})
+                                    return
+                        
+                        for finished in done:
+                            try:
+                                message = finished.result()
+                                if message and isinstance(message, dict) and message.get("type") == "message":
+                                    channel = message.get("channel")
+                                    data = message.get("data")
+                                    if isinstance(data, bytes):
+                                        data = data.decode('utf-8')
+
+                                    if channel == response_channel and data == "new":
+                                        await message_queue.put({"type": "new_response"})
+                                    elif channel == control_channel and data in ["STOP", "END_STREAM", "ERROR"]:
+                                        logger.debug(f"Received control signal '{data}' for {agent_run_id}")
+                                        await message_queue.put({"type": "control", "data": data})
+                                        return  # Stop listening on control signal
+
+                            except StopAsyncIteration:
+                                logger.warning(f"Listener stopped for {agent_run_id}.")
+                                await message_queue.put({"type": "error", "data": "Listener stopped unexpectedly"})
+                                return
+                            except Exception as e:
+                                logger.error(f"Error in listener for {agent_run_id}: {e}")
+                                await message_queue.put({"type": "error", "data": "Listener failed"})
+                                return
+                            finally:
+                                # Resubscribe to the next message if continuing
+                                if not terminate_stream:
+                                    task = asyncio.create_task(listener.__anext__())
+                    
+                    except asyncio.TimeoutError:
+                        logger.debug(f"Pub/Sub timeout for {agent_run_id}, continuing...")
+                        task = asyncio.create_task(listener.__anext__())
+                        continue
+                    except Exception as e:
+                        logger.error(f"Unexpected error in listen_messages for {agent_run_id}: {e}")
+                        await message_queue.put({"type": "error", "data": "Unexpected error in listener"})
+                        return
 
 
             listener_task = asyncio.create_task(listen_messages())
