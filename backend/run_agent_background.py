@@ -55,7 +55,7 @@ async def initialize():
     
     # Build and warm up an async client for any async paths in your app
     _ASYNC_REDIS = rc.build_async_client()
-    await rc.initialize_async(_ASYNC_REDIS)
+    await rc.initialize_async_client(_ASYNC_REDIS)
     
     await db.initialize()
 
