@@ -167,7 +167,8 @@ async def run_agent_background(
                 
                 # Store response in Redis list and publish notification
                 pending_redis_operations.append(asyncio.create_task(redis.rpush(response_list_key, response_json)))
-                pending_redis_operations.append(asyncio.create_task(redis.publish(response_channel, "new")))
+                # Use dedicated publisher for immediate streaming
+                pending_redis_operations.append(asyncio.create_task(rc.publish_to_channel(response_channel, "new")))
             
             # Wait for all Redis operations to complete
             if pending_redis_operations:
@@ -180,7 +181,7 @@ async def run_agent_background(
                 "total_responses": len(responses)
             }
             await redis.rpush(response_list_key, json.dumps(completion_message))
-            await redis.publish(response_channel, "new") # Notify about the completion message
+            await rc.publish_to_channel(response_channel, "new") # Notify about the completion message
             
             logger.info(f"Agent run {agent_run_id} completed successfully with {len(responses)} responses")
             
@@ -200,7 +201,7 @@ async def run_agent_background(
                 "responses_so_far": len(all_responses)
             }
             await redis.rpush(response_list_key, json.dumps(error_response))
-            await redis.publish(response_channel, "new")
+            await rc.publish_to_channel(response_channel, "new")
             
             # Send control signal
             control_signal = {
@@ -208,7 +209,7 @@ async def run_agent_background(
                 "message": str(e),
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
-            await redis.publish(global_control_channel, json.dumps(control_signal))
+            await rc.publish_to_channel(global_control_channel, json.dumps(control_signal))
             
             # Get final responses
             all_responses_json = await redis.lrange(response_list_key, 0, -1)
@@ -217,7 +218,7 @@ async def run_agent_background(
             logger.error(f"Agent run {agent_run_id} failed with {len(all_responses)} responses before error")
             
             # Send final error control signal
-            await redis.publish(global_control_channel, "ERROR")
+            await rc.publish_to_channel(global_control_channel, "ERROR")
             
             raise e
         

@@ -39,7 +39,7 @@ def build_sync_client():
             port=port,
             password=password,
             db=db,
-            decode_responses=False,  # Keep as bytes for Dramatiq compatibility
+            decode_responses=True,  # Use string mode for consistency with async client
             socket_timeout=DEFAULT_TIMEOUT,
             socket_connect_timeout=DEFAULT_TIMEOUT,
             socket_keepalive=True,
@@ -209,3 +209,25 @@ async def keys(pattern: str):
 async def expire(key: str, time: int):
     redis = await get_client()
     return await redis.expire(key, time)
+
+# Dedicated Redis clients for pub/sub operations
+async def get_publisher():
+    """Get a dedicated Redis client for publishing messages."""
+    return build_async_client()
+
+async def get_subscriber():
+    """Get a dedicated Redis client for subscribing to channels."""
+    return build_async_client()
+
+async def publish_to_channel(channel: str, message: str):
+    """Publish a message to a specific channel using a dedicated publisher."""
+    publisher = await get_publisher()
+    try:
+        return await publisher.publish(channel, message)
+    finally:
+        await publisher.close()
+
+async def create_dedicated_pubsub():
+    """Create a dedicated pubsub connection for streaming."""
+    subscriber = await get_subscriber()
+    return subscriber.pubsub()

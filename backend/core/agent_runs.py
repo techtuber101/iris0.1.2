@@ -591,10 +591,15 @@ async def stream_agent_run(
                 thread_id=agent_run_data.get('thread_id'),
             )
 
-            # 3. Use a single Pub/Sub connection subscribed to both channels
-            pubsub = await redis_client.create_pubsub()
+            # 3. Use a dedicated Pub/Sub connection for streaming
+            pubsub = await redis_client.create_dedicated_pubsub()
             await pubsub.subscribe(response_channel, control_channel)
             logger.debug(f"Subscribed to channels: {response_channel}, {control_channel}")
+            
+            # Also subscribe to per-thread channel for direct streaming
+            thread_channel = f"thread:{agent_run_data.get('thread_id')}"
+            await pubsub.subscribe(thread_channel)
+            logger.debug(f"Also subscribed to thread channel: {thread_channel}")
 
             # Queue to communicate between listeners and the main generator loop
             message_queue = asyncio.Queue()
@@ -653,6 +658,13 @@ async def stream_agent_run(
 
                                     if channel == response_channel and data == "new":
                                         await message_queue.put({"type": "new_response"})
+                                    elif channel == thread_channel:
+                                        # Direct streaming event from agent execution
+                                        try:
+                                            event_data = json.loads(data)
+                                            await message_queue.put({"type": "direct_stream", "data": event_data})
+                                        except json.JSONDecodeError:
+                                            logger.warning(f"Failed to parse direct stream event: {data}")
                                     elif channel == control_channel and data in ["STOP", "END_STREAM", "ERROR"]:
                                         logger.debug(f"Received control signal '{data}' for {agent_run_id}")
                                         await message_queue.put({"type": "control", "data": data})
@@ -737,6 +749,18 @@ async def stream_agent_run(
                             last_processed_index += num_new
                         if terminate_stream: break
 
+                    elif queue_item["type"] == "direct_stream":
+                        # Handle direct streaming events from agent execution
+                        event_data = queue_item["data"]
+                        logger.debug(f"📡 Direct stream event for {agent_run_id}: {event_data.get('type', 'unknown')}")
+                        yield f"data: {json.dumps(event_data)}\n\n"
+                        
+                        # Check if this is a completion event
+                        if event_data.get('type') == 'done':
+                            logger.info(f"🏁 Direct stream completion for {agent_run_id}")
+                            terminate_stream = True
+                            break
+
                     elif queue_item["type"] == "control":
                         control_signal = queue_item["data"]
                         terminate_stream = True # Stop the stream on any control signal
@@ -775,7 +799,7 @@ async def stream_agent_run(
             # Graceful shutdown order: unsubscribe → close → cancel
             try:
                 if 'pubsub' in locals() and pubsub:
-                    await pubsub.unsubscribe(response_channel, control_channel)
+                    await pubsub.unsubscribe(response_channel, control_channel, thread_channel)
                     await pubsub.close()
             except Exception as e:
                 logger.debug(f"Error during pubsub cleanup for {agent_run_id}: {e}")

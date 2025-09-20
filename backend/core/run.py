@@ -783,6 +783,20 @@ class AgentRunner:
                                     pass
 
                             yield chunk
+                            
+                            # Publish streaming events directly to Redis for real-time updates
+                            if self.config.stream and chunk.get('type') == 'assistant':
+                                try:
+                                    from core.services import redis_client as rc
+                                    thread_channel = f"thread:{self.config.thread_id}"
+                                    await rc.publish_to_channel(thread_channel, json.dumps({
+                                        'type': 'token',
+                                        'threadId': self.config.thread_id,
+                                        'content': chunk.get('content', ''),
+                                        'ts': int(datetime.now().timestamp() * 1000)
+                                    }))
+                                except Exception as e:
+                                    logger.debug(f"Failed to publish streaming event: {e}")
                     else:
                         error_detected = True
 

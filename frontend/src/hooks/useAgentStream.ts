@@ -7,6 +7,7 @@ import {
   AgentRun,
   getMessages,
 } from '@/lib/api';
+import { createStreamingClient } from '@/lib/streaming-client';
 import { toast } from 'sonner';
 import {
   UnifiedMessage,
@@ -122,7 +123,7 @@ export function useAgentStream(
   const [error, setError] = useState<string | null>(null);
   const [agentRunId, setAgentRunId] = useState<string | null>(null);
 
-  const streamCleanupRef = useRef<(() => void) | null>(null);
+  const streamingClientRef = useRef<ReturnType<typeof createStreamingClient> | null>(null);
   const isMountedRef = useRef<boolean>(true);
   const currentRunIdRef = useRef<string | null>(null); // Ref to track the run ID being processed
   const threadIdRef = useRef(threadId); // Ref to hold the current threadId
@@ -165,11 +166,11 @@ export function useAgentStream(
     if (
       previousThreadId &&
       previousThreadId !== threadId &&
-      streamCleanupRef.current
+      streamingClientRef.current
     ) {
       // Close the existing stream for the previous thread
-      streamCleanupRef.current();
-      streamCleanupRef.current = null;
+      streamingClientRef.current.disconnect();
+      streamingClientRef.current = null;
       setStatus('idle');
       setTextContent([]);
       setToolCall(null);
@@ -246,9 +247,9 @@ export function useAgentStream(
         return;
       }
 
-      if (streamCleanupRef.current) {
-        streamCleanupRef.current();
-        streamCleanupRef.current = null;
+      if (streamingClientRef.current) {
+        streamingClientRef.current.disconnect();
+        streamingClientRef.current = null;
       }
 
       // Reset streaming-specific state
@@ -612,9 +613,11 @@ export function useAgentStream(
       // Flush any remaining pending content
       flushPendingContent();
 
-      // Don't automatically cleanup streams on navigation
-      // Only set mounted flag to false to prevent new operations
-      // Streams will be cleaned up when they naturally complete or on explicit stop
+      // Clean up streaming client on unmount
+      if (streamingClientRef.current) {
+        streamingClientRef.current.disconnect();
+        streamingClientRef.current = null;
+      }
     };
   }, []); // Empty dependency array for mount/unmount effect
 
@@ -626,8 +629,8 @@ export function useAgentStream(
 
       console.log(`[useAgentStream] Starting stream for run ID: ${runId}`);
 
-      // Store previous stream cleanup for potential restoration
-      const previousCleanup = streamCleanupRef.current;
+      // Store previous stream client for potential restoration
+      const previousClient = streamingClientRef.current;
       const previousRunId = currentRunIdRef.current;
 
       try {
@@ -660,10 +663,10 @@ export function useAgentStream(
         }
 
         // New agent is running, now it's safe to clean up previous stream
-        if (previousCleanup && previousRunId !== runId) {
+        if (previousClient && previousRunId !== runId) {
           console.log(`[useAgentStream] Cleaning up previous stream ${previousRunId} to start new stream ${runId}`);
-          previousCleanup();
-          streamCleanupRef.current = null;
+          previousClient.disconnect();
+          streamingClientRef.current = null;
         }
 
         // Reset state for the new stream
@@ -679,13 +682,13 @@ export function useAgentStream(
         );
 
         // Agent is running, proceed to create the stream
-        const cleanup = streamAgent(runId, {
-          onMessage: (data) => {
+        const streamingClient = createStreamingClient({
+          onMessage: (event) => {
             // Ignore messages if threadId changed while the EventSource stayed open
             if (threadIdRef.current !== threadId) return;
             // Ignore messages if this is not the current run ID
             if (currentRunIdRef.current !== runId) return;
-            handleStreamMessage(data);
+            handleStreamMessage(JSON.stringify(event));
           },
           onError: (err) => {
             if (threadIdRef.current !== threadId) return;
@@ -697,8 +700,14 @@ export function useAgentStream(
             if (currentRunIdRef.current !== runId) return;
             handleStreamClose();
           },
+          onReconnect: (attempt) => {
+            console.log(`[useAgentStream] Reconnecting stream for ${runId}, attempt ${attempt}`);
+            toast.info(`Reconnecting stream... (attempt ${attempt})`);
+          }
         });
-        streamCleanupRef.current = cleanup;
+        
+        streamingClientRef.current = streamingClient;
+        await streamingClient.connect(runId);
         console.log(
           `[useAgentStream] Stream created successfully for run ID: ${runId}`,
         );
@@ -787,6 +796,10 @@ export function useAgentStream(
     const runIdToStop = agentRunId;
 
     // Immediately update status and clean up stream
+    if (streamingClientRef.current) {
+      streamingClientRef.current.disconnect();
+      streamingClientRef.current = null;
+    }
     finalizeStream('stopped', runIdToStop);
 
     try {
