@@ -13,7 +13,25 @@ from core.utils.auth_utils import verify_and_get_user_id_from_jwt
 from core.utils.logger import logger
 from core.utils.config import config
 from core.services.billing import can_use_model
-from billing.billing_integration import billing_integration
+# Import billing integration conditionally
+try:
+    from core.settings import settings
+    if settings.BILLING_ENABLED:
+        from billing.billing_integration import billing_integration
+    else:
+        # Create a stub billing integration when billing is disabled
+        class StubBillingIntegration:
+            async def check_billing_status(self, account_id: str):
+                return {'can_run': True, 'message': 'Billing disabled - unlimited usage'}
+        
+        billing_integration = StubBillingIntegration()
+except ImportError:
+    # Fallback if billing module is not available
+    class StubBillingIntegration:
+        async def check_billing_status(self, account_id: str):
+            return {'can_run': True, 'message': 'Billing disabled - unlimited usage'}
+    
+    billing_integration = StubBillingIntegration()
 
 from .trigger_service import get_trigger_service, TriggerType
 from .provider_service import get_provider_service

@@ -17,9 +17,13 @@ RUN uv sync --locked --quiet
 # Copy application code
 COPY . .
 
+# Copy static files for Composio toolkit icons
+COPY static ./static
+
 # Optional: expose a default port for local dev
 # (ignored by Railway since it injects its own PORT at runtime)
 EXPOSE 8000
 
 # Start command — uses Railway's $PORT if set, otherwise defaults to 8000
-CMD ["sh", "-c", "uv run python -m uvicorn core.run:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Use api:app instead of core.run:app to match the main API file
+CMD ["sh", "-c", "uv run python -m uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

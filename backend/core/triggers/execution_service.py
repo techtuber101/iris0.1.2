@@ -380,7 +380,26 @@ class AgentExecutor:
             raise ValueError("Account ID not found in agent configuration")
         
         from core.services.billing import can_use_model
-        from billing.billing_integration import billing_integration
+        
+        # Import billing integration conditionally
+        try:
+            from core.settings import settings
+            if settings.BILLING_ENABLED:
+                from billing.billing_integration import billing_integration
+            else:
+                # Create a stub billing integration when billing is disabled
+                class StubBillingIntegration:
+                    async def check_and_reserve_credits(self, account_id: str):
+                        return True, "Billing disabled - unlimited usage", None
+                
+                billing_integration = StubBillingIntegration()
+        except ImportError:
+            # Fallback if billing module is not available
+            class StubBillingIntegration:
+                async def check_and_reserve_credits(self, account_id: str):
+                    return True, "Billing disabled - unlimited usage", None
+            
+            billing_integration = StubBillingIntegration()
         
         can_use, model_message, allowed_models = await can_use_model(client, account_id, model_name)
         if not can_use:
@@ -677,7 +696,26 @@ class WorkflowExecutor:
                 raise ValueError("Cannot determine account ID for workflow execution")
         
         from core.services.billing import can_use_model
-        from billing.billing_integration import billing_integration
+        
+        # Import billing integration conditionally
+        try:
+            from core.settings import settings
+            if settings.BILLING_ENABLED:
+                from billing.billing_integration import billing_integration
+            else:
+                # Create a stub billing integration when billing is disabled
+                class StubBillingIntegration:
+                    async def check_and_reserve_credits(self, account_id: str):
+                        return True, "Billing disabled - unlimited usage", None
+                
+                billing_integration = StubBillingIntegration()
+        except ImportError:
+            # Fallback if billing module is not available
+            class StubBillingIntegration:
+                async def check_and_reserve_credits(self, account_id: str):
+                    return True, "Billing disabled - unlimited usage", None
+            
+            billing_integration = StubBillingIntegration()
         
         can_use, model_message, allowed_models = await can_use_model(client, account_id, model_name)
         if not can_use:

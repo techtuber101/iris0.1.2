@@ -4,6 +4,7 @@ load_dotenv()
 from fastapi import FastAPI, Request, HTTPException, Response, Depends, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from core.services import redis
 import sentry
 from contextlib import asynccontextmanager
@@ -11,10 +12,12 @@ from core.agentpress.thread_manager import ThreadManager
 from core.services.supabase import DBConnection
 from datetime import datetime, timezone
 from core.utils.config import config, EnvMode
+from core.settings import settings
 import asyncio
 from core.utils.logger import logger, structlog
 import time
 from collections import OrderedDict
+import os
 
 from pydantic import BaseModel
 import uuid
@@ -22,14 +25,21 @@ import uuid
 from core import api as core_api
 
 from core.sandbox import api as sandbox_api
-from billing.api import router as billing_router
-from billing.admin import router as billing_admin_router
+from core.billing_stub import router as billing_stub_router
 from admin import users_admin
 from core.services import transcription as transcription_api
 import sys
 from core.services import email_api
 from core.triggers import api as triggers_api
 from core.services import api_keys_api
+
+# Conditionally import billing modules only if enabled
+if settings.BILLING_ENABLED:
+    from billing.api import router as billing_router
+    from billing.admin import router as billing_admin_router
+else:
+    billing_router = None
+    billing_admin_router = None
 
 
 if sys.platform == "win32":
@@ -44,19 +54,27 @@ MAX_CONCURRENT_IPS = 25
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.debug(f"Starting up FastAPI application with instance ID: {instance_id} in {config.ENV_MODE.value} mode")
+    logger.info(f"=== STARTING UP FASTAPI APPLICATION ===")
+    logger.info(f"Instance ID: {instance_id}")
+    logger.info(f"Environment Mode: {config.ENV_MODE.value}")
+    logger.info(f"Billing Enabled: {settings.BILLING_ENABLED}")
+    logger.info(f"Working Directory: {os.getcwd()}")
+    logger.info(f"Static Directory Exists: {os.path.exists(os.path.join(os.getcwd(), 'static'))}")
+    
     try:
         await db.initialize()
+        logger.info("Database connection initialized")
         
         core_api.initialize(
             db,
             instance_id
         )
-        
+        logger.info("Core API initialized")
         
         sandbox_api.initialize(db)
+        logger.info("Sandbox API initialized")
         
-        # Initialize Redis connection
+        # Initialize Redis connection (optional)
         from core.services import redis
         try:
             await redis.initialize_async()
@@ -69,13 +87,41 @@ async def lifespan(app: FastAPI):
         # asyncio.create_task(core_api.restore_running_agent_runs())
         
         triggers_api.initialize(db)
-        pipedream_api.initialize(db)
-        credentials_api.initialize(db)
-        template_api.initialize(db)
-        composio_api.initialize(db)
+        
+        # Initialize optional modules
+        try:
+            from core.pipedream import api as pipedream_api
+            pipedream_api.initialize(db)
+            logger.info("Pipedream API initialized")
+        except ImportError:
+            logger.warning("Pipedream module not available")
+        
+        try:
+            from core.credentials import api as credentials_api
+            credentials_api.initialize(db)
+            logger.info("Credentials API initialized")
+        except ImportError:
+            logger.warning("Credentials module not available")
+        
+        try:
+            from core.templates import api as template_api
+            template_api.initialize(db)
+            logger.info("Templates API initialized")
+        except ImportError:
+            logger.warning("Templates module not available")
+        
+        try:
+            from core.composio_integration import api as composio_api
+            composio_api.initialize(db)
+            logger.info("Composio API initialized")
+        except ImportError:
+            logger.warning("Composio module not available")
+        
+        logger.info("=== APPLICATION STARTUP COMPLETE ===")
         
         yield
         
+        logger.info("=== SHUTTING DOWN APPLICATION ===")
         logger.debug("Cleaning up agent resources")
         await core_api.cleanup()
         
@@ -88,11 +134,38 @@ async def lifespan(app: FastAPI):
 
         logger.debug("Disconnecting from database")
         await db.disconnect()
+        logger.info("=== APPLICATION SHUTDOWN COMPLETE ===")
     except Exception as e:
         logger.error(f"Error during application startup: {e}")
         raise
 
 app = FastAPI(lifespan=lifespan)
+
+# Log all routes for debugging
+@app.on_event("startup")
+async def log_routes():
+    """Log all registered routes for debugging purposes."""
+    logger.info("=== REGISTERED ROUTES ===")
+    for route in app.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            methods = ', '.join(route.methods) if route.methods else 'N/A'
+            logger.info(f"ROUTE {methods} {route.path}")
+        elif hasattr(route, 'path'):
+            logger.info(f"ROUTE N/A {route.path}")
+    logger.info("=== END REGISTERED ROUTES ===")
+    
+    # Log static files info
+    static_dir = os.path.join(os.getcwd(), "static")
+    if os.path.exists(static_dir):
+        logger.info(f"Static directory found: {static_dir}")
+        toolkits_dir = os.path.join(static_dir, "toolkits")
+        if os.path.exists(toolkits_dir):
+            files = os.listdir(toolkits_dir)
+            logger.info(f"Toolkit icons available: {files}")
+        else:
+            logger.warning(f"Toolkits directory not found: {toolkits_dir}")
+    else:
+        logger.warning(f"Static directory not found: {static_dir}")
 
 @app.middleware("http")
 async def log_requests_middleware(request: Request, call_next):
@@ -144,48 +217,72 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_origin_regex=allow_origin_regex,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Project-Id", "X-MCP-URL", "X-MCP-Type", "X-MCP-Headers", "X-Refresh-Token", "X-API-Key"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Create a main API router
 api_router = APIRouter()
 
-# Include all API routers without individual prefixes
+# Include core API routers
 api_router.include_router(core_api.router)
 api_router.include_router(sandbox_api.router)
-api_router.include_router(billing_router)
 api_router.include_router(api_keys_api.router)
-api_router.include_router(billing_admin_router)
 api_router.include_router(users_admin.router)
 
-from core.mcp_module import api as mcp_api
-from core.credentials import api as credentials_api
-from core.templates import api as template_api
+# Include optional modules
+try:
+    from core.mcp_module import api as mcp_api
+    api_router.include_router(mcp_api.router)
+except ImportError:
+    logger.warning("MCP module not available")
 
-api_router.include_router(mcp_api.router)
-api_router.include_router(credentials_api.router, prefix="/secure-mcp")
-api_router.include_router(template_api.router, prefix="/templates")
+try:
+    from core.credentials import api as credentials_api
+    api_router.include_router(credentials_api.router, prefix="/secure-mcp")
+except ImportError:
+    logger.warning("Credentials module not available")
+
+try:
+    from core.templates import api as template_api
+    api_router.include_router(template_api.router, prefix="/templates")
+except ImportError:
+    logger.warning("Templates module not available")
 
 api_router.include_router(transcription_api.router)
 api_router.include_router(email_api.router)
 
-from core.knowledge_base import api as knowledge_base_api
-api_router.include_router(knowledge_base_api.router)
+try:
+    from core.knowledge_base import api as knowledge_base_api
+    api_router.include_router(knowledge_base_api.router)
+except ImportError:
+    logger.warning("Knowledge base module not available")
 
 api_router.include_router(triggers_api.router)
 
-from core.pipedream import api as pipedream_api
-api_router.include_router(pipedream_api.router)
+try:
+    from core.pipedream import api as pipedream_api
+    api_router.include_router(pipedream_api.router)
+except ImportError:
+    logger.warning("Pipedream module not available")
 
-from core.admin import api as admin_api
-api_router.include_router(admin_api.router)
+try:
+    from core.admin import api as admin_api
+    api_router.include_router(admin_api.router)
+except ImportError:
+    logger.warning("Admin module not available")
 
-from core.composio_integration import api as composio_api
-api_router.include_router(composio_api.router)
+try:
+    from core.composio_integration import api as composio_api
+    api_router.include_router(composio_api.router)
+except ImportError:
+    logger.warning("Composio module not available")
 
-from core.google.google_slides_api import router as google_slides_router
-api_router.include_router(google_slides_router)
+try:
+    from core.google.google_slides_api import router as google_slides_router
+    api_router.include_router(google_slides_router)
+except ImportError:
+    logger.warning("Google Slides module not available")
 
 @api_router.get("/health")
 async def health_check():
@@ -227,9 +324,29 @@ async def root():
 async def health():
     return {"status": "ok", "message": "Iris API is healthy"}
 
+# Mount static files for Composio toolkit icons
+static_dir = os.path.join(os.getcwd(), "static")
+if os.path.exists(static_dir):
+    app.mount("/composio/toolkits", StaticFiles(directory=os.path.join(static_dir, "toolkits")), name="toolkits")
+    logger.info(f"Mounted static files from {static_dir}/toolkits")
+else:
+    logger.warning(f"Static directory not found: {static_dir}")
+
+# Include billing router (real or stub)
+if settings.BILLING_ENABLED and billing_router:
+    app.include_router(billing_router)
+    if billing_admin_router:
+        app.include_router(billing_admin_router)
+    logger.info("Billing enabled - using real billing router")
+else:
+    app.include_router(billing_stub_router)
+    logger.info("Billing disabled - using stub billing router")
+
+# Include main API router
 app.include_router(api_router, prefix="/api")
-app.include_router(billing_router)
 app.include_router(transcription_api.router)
+
+# Routes are logged in the startup event handler above
 
 
 if __name__ == "__main__":

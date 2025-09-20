@@ -23,7 +23,25 @@ from core.prompts.prompt import get_system_prompt
 from core.utils.logger import logger
 from core.utils.llm_cache_utils import format_message_with_cache
 
-from billing.billing_integration import billing_integration
+# Import billing integration conditionally
+try:
+    from core.settings import settings
+    if settings.BILLING_ENABLED:
+        from billing.billing_integration import billing_integration
+    else:
+        # Create a stub billing integration when billing is disabled
+        class StubBillingIntegration:
+            async def check_and_reserve_credits(self, account_id: str):
+                return True, "Billing disabled - unlimited usage", None
+        
+        billing_integration = StubBillingIntegration()
+except ImportError:
+    # Fallback if billing module is not available
+    class StubBillingIntegration:
+        async def check_and_reserve_credits(self, account_id: str):
+            return True, "Billing disabled - unlimited usage", None
+    
+    billing_integration = StubBillingIntegration()
 from core.tools.sb_vision_tool import SandboxVisionTool
 from core.tools.sb_image_edit_tool import SandboxImageEditTool
 from core.tools.sb_presentation_outline_tool import SandboxPresentationOutlineTool

@@ -26,8 +26,34 @@ from core.utils.logger import logger
 from langfuse.client import StatefulGenerationClient, StatefulTraceClient
 from core.services.langfuse import langfuse
 from litellm.utils import token_counter
-from billing.billing_integration import billing_integration
-from billing.api import calculate_token_cost
+# Import billing modules conditionally
+try:
+    from core.settings import settings
+    if settings.BILLING_ENABLED:
+        from billing.billing_integration import billing_integration
+        from billing.api import calculate_token_cost
+    else:
+        # Create stub billing integration when billing is disabled
+        class StubBillingIntegration:
+            async def check_and_reserve_credits(self, account_id: str):
+                return True, "Billing disabled - unlimited usage", None
+        
+        def calculate_token_cost(prompt_tokens: int, completion_tokens: int, model: str):
+            from decimal import Decimal
+            return Decimal('0')
+        
+        billing_integration = StubBillingIntegration()
+except ImportError:
+    # Fallback if billing module is not available
+    class StubBillingIntegration:
+        async def check_and_reserve_credits(self, account_id: str):
+            return True, "Billing disabled - unlimited usage", None
+    
+    def calculate_token_cost(prompt_tokens: int, completion_tokens: int, model: str):
+        from decimal import Decimal
+        return Decimal('0')
+    
+    billing_integration = StubBillingIntegration()
 import re
 from datetime import datetime, timezone, timedelta
 import aiofiles

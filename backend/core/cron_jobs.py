@@ -2,7 +2,19 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from core.services.supabase import DBConnection  
 from core.credits import credit_service
-from billing.config import get_monthly_credits
+# Import billing config conditionally
+try:
+    from core.settings import settings
+    if settings.BILLING_ENABLED:
+        from billing.config import get_monthly_credits
+    else:
+        # Default function when billing is disabled
+        def get_monthly_credits(tier_name: str) -> int:
+            return 999999
+except ImportError:
+    # Fallback if billing module is not available
+    def get_monthly_credits(tier_name: str) -> int:
+        return 999999
 from core.utils.logger import logger
 
 class CreditGrantJob:
