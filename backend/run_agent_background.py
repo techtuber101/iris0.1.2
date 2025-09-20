@@ -23,23 +23,33 @@ from core.utils.retry import retry
 import sentry_sdk
 from typing import Dict, Any
 
-# Try using REDIS_URL first, fallback to individual parameters
-redis_url = os.getenv('REDIS_URL')
-if redis_url:
-    # Parse Redis URL manually since from_url doesn't exist in this Dramatiq version
-    import urllib.parse
-    parsed = urllib.parse.urlparse(redis_url)
-    redis_host = parsed.hostname or 'localhost'
-    redis_port = parsed.port or 6379
-    redis_password = parsed.password or ''
-    redis_broker = RedisBroker(host=redis_host, port=redis_port, password=redis_password, middleware=[dramatiq.middleware.AsyncIO()])
-else:
-    redis_host = os.getenv('REDIS_HOST', 'redis')
-    redis_port = int(os.getenv('REDIS_PORT', 6379))
-    redis_password = os.getenv('REDIS_PASSWORD', '')  # Empty string for no password
-    redis_broker = RedisBroker(host=redis_host, port=redis_port, password=redis_password, middleware=[dramatiq.middleware.AsyncIO()])
+# Global broker variable
+redis_broker = None
 
-dramatiq.set_broker(redis_broker)
+def setup_redis_broker():
+    """Setup Redis broker for Dramatiq - only call this in worker processes"""
+    global redis_broker
+    if redis_broker is not None:
+        return redis_broker
+    
+    # Try using REDIS_URL first, fallback to individual parameters
+    redis_url = os.getenv('REDIS_URL')
+    if redis_url:
+        # Parse Redis URL manually since from_url doesn't exist in this Dramatiq version
+        import urllib.parse
+        parsed = urllib.parse.urlparse(redis_url)
+        redis_host = parsed.hostname or 'localhost'
+        redis_port = parsed.port or 6379
+        redis_password = parsed.password or ''
+        redis_broker = RedisBroker(host=redis_host, port=redis_port, password=redis_password, middleware=[dramatiq.middleware.AsyncIO()])
+    else:
+        redis_host = os.getenv('REDIS_HOST', 'redis')
+        redis_port = int(os.getenv('REDIS_PORT', 6379))
+        redis_password = os.getenv('REDIS_PASSWORD', '')  # Empty string for no password
+        redis_broker = RedisBroker(host=redis_host, port=redis_port, password=redis_password, middleware=[dramatiq.middleware.AsyncIO()])
+    
+    dramatiq.set_broker(redis_broker)
+    return redis_broker
 
 
 _initialized = False
@@ -57,6 +67,9 @@ async def initialize():
 
     _initialized = True
     logger.debug(f"Initialized agent API with instance ID: {instance_id}")
+
+# Setup Redis broker for Dramatiq actors
+setup_redis_broker()
 
 @dramatiq.actor
 async def check_health(key: str):

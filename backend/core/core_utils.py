@@ -11,7 +11,18 @@ from .utils.auth_utils import verify_and_authorize_thread_access
 from core.services import redis_client
 from core.services.supabase import DBConnection
 from core.services.llm import make_llm_api_call
-from run_agent_background import update_agent_run_status, _cleanup_redis_response_list
+# Import run_agent_background functions conditionally to avoid Dramatiq broker setup in main API
+try:
+    from run_agent_background import update_agent_run_status, _cleanup_redis_response_list
+except ImportError:
+    # Fallback functions if run_agent_background is not available
+    def update_agent_run_status(*args, **kwargs):
+        logger.warning("update_agent_run_status not available - run_agent_background not imported")
+        return None
+    
+    def _cleanup_redis_response_list(*args, **kwargs):
+        logger.warning("_cleanup_redis_response_list not available - run_agent_background not imported")
+        return None
 
 # Global variables (will be set by initialize function)
 db = None
