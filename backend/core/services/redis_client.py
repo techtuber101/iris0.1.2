@@ -78,7 +78,7 @@ def build_async_client():
         # Return a dummy client that will fail gracefully
         return redis_async.Redis(host='localhost', port=6379, decode_responses=True)
 
-async def initialize_async(client: "redis_async.Redis"):
+async def initialize_async_client(client: "redis_async.Redis"):
     # bounded exponential backoff: 0.5s → 1s → 2s → 4s → 8s
     delay = 0.5
     last_exc = None
@@ -160,7 +160,7 @@ async def initialize_async():
         try:
             # Use the new robust client builder
             client = build_async_client()
-            await initialize_async(client)
+            await initialize_async_client(client)
             _initialized = True
             log.info("Redis async client initialized successfully")
         except Exception as e:
