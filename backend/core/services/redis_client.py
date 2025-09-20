@@ -1,3 +1,4 @@
+from typing import Optional, Union
 import os
 import asyncio
 import logging
@@ -88,8 +89,8 @@ async def initialize_async(client: "redis_async.Redis"):
     )
 
 # Legacy compatibility - keep existing interface
-client: redis_async.Redis | None = None
-pool: redis_async.ConnectionPool | None = None
+client: Optional[redis_async.Redis] = None
+pool: Optional[redis_async.ConnectionPool] = None
 _initialized = False
 _init_lock = asyncio.Lock()
 
