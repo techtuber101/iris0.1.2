@@ -7,7 +7,7 @@ ENV ENV_MODE=production
 WORKDIR /app
 
 # Install system dependencies
-RUN apk add --no-cache curl git
+RUN apk add --no-cache curl git gcc python3-dev musl-dev linux-headers
 
 # Copy dependency files and install
 COPY pyproject.toml uv.lock ./
